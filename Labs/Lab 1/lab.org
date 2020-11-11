@@ -320,6 +320,7 @@ plot_tbl_prof(
 [[file:lex_step.svg]]
 Looking at Figures [[fig:alu_ramp]] and [[fig:lex_sheet]], and comparing with the lab manual/sensor datasheets, there appears to be a discrepancy between the lab manual's description of the test setup and the data.
 The lab manual suggests that the output of each sensor is directly connected to the amplifier, but the data seems be negatively proportional to what would normally be expected.
+Specifically, we expect the IR sensor reading to go down with distance, and the LED sensor reading to go up with distance.
 This suggests that the sensing circuit is probably closer to something like Figure [[fig:sensor_circuit]]
 
 #+ATTR_LATEX: :placement [H]
@@ -548,7 +549,7 @@ This sensor does not output an analog signal, it simply outputs a boolean value 
 However, a switch like this could be combined with a linear stage to sense a wide range of distances.
 ** Linear Potentiometer Wiring Diagram
 #+ATTR_LATEX: :placement [H]
-#+NAME: fig:pot_vs_ref
+#+NAME: fig:lin_pot_wiring_diagram
 #+CAPTION: Wiring diagram for the Linear Potentiometer and DAQ interface
 [[file:lin_pot_circuit.svg]]
 
