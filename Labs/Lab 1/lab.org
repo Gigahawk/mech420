@@ -1,0 +1,581 @@
+#+TITLE: MECH 420 Lab 1
+#+AUTHOR: Jasper Chan - 37467164 @@latex:\\@@ jasperchan515@gmail.com
+
+#+OPTIONS: title:nil toc:nil
+
+#+LATEX_HEADER: \definecolor{bg}{rgb}{0.95,0.95,0.95}
+#+LATEX_HEADER: \setminted{frame=single,bgcolor=bg,samepage=true}
+#+LATEX_HEADER: \setlength{\parindent}{0pt}
+#+LATEX_HEADER: \usepackage{float}
+#+LATEX_HEADER: \usepackage{svg}
+#+LATEX_HEADER: \usepackage{cancel}
+#+LATEX_HEADER: \usepackage{amssymb}
+#+LATEX_HEADER: \usepackage{mathtools, nccmath}
+#+LATEX_HEADER: \DeclareSIUnit\inch{in}
+#+LATEX_HEADER: \newcommand{\Lwrap}[1]{\left\{#1\right\}}
+#+LATEX_HEADER: \newcommand{\Lagr}[1]{\mathcal{L}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Lagri}[1]{\mathcal{L}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztrans}[1]{\mathcal{Z}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztransi}[1]{\mathcal{Z}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\ZOH}[1]{\text{ZOH}\left(#1\right)}
+#+LATEX_HEADER: \newcommand{\approptoinn}[2]{\mathrel{\vcenter{\offinterlineskip\halign{\hfil$##$\cr#1\propto\cr\noalign{\kern2pt}#1\sim\cr\noalign{\kern-2pt}}}}}
+#+LATEX_HEADER: \newcommand{\appropto}{\mathpalette\approptoinn\relax}
+
+#+BEGIN_EXPORT latex
+\makeatletter
+\begin{titlepage}
+\begin{center}
+\vspace*{2in}
+{\Large \@title \par}
+\vspace{1in}
+{\Large \@author \par}
+\vspace{3in}
+{\large \@date}
+\end{center}
+\end{titlepage}
+\makeatother
+#+END_EXPORT
+
+
+\tableofcontents
+
+#+begin_src ipython :session :results raw drawer :exports none
+import numpy as np
+import scipy.optimize
+from numpy.polynomial.polynomial import Polynomial as P
+import pandas as pd
+import matplotlib
+from matplotlib import pyplot as plt
+import prox_tv as ptv
+from IPython.display import set_matplotlib_formats
+%matplotlib inline
+set_matplotlib_formats('svg')
+matplotlib.rcParams.update({'errorbar.capsize': 2})
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[375]:
+:end:
+
+#+begin_src ipython :session :results raw drawer :exports none
+import IPython
+from tabulate import tabulate
+
+class OrgFormatter(IPython.core.formatters.BaseFormatter):
+    def __call__(self, obj):
+        try:
+            return tabulate(obj, headers='keys',
+                            tablefmt='orgtbl', showindex='always')
+        except:
+            return None
+
+ip = get_ipython()
+ip.display_formatter.formatters['text/org'] = OrgFormatter()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[14]:
+:end:
+
+
+
+Note: when not specified, all units are SI without prefixes.
+* Calibration of the Linear Potentiometer
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+First let's load in the provided data:
+#+begin_src ipython :session :exports both :results raw drawer
+df = pd.read_csv('data/part_1.csv')
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[275]:
+:end:
+
+The profile used to collect this part of the data appears to be a ramp[fn:errata1], which means we can correlate the linear position of the table to the dial gauge measurement through some arbitrary scaling and offset factors[fn:nooffset].
+We can convince ourselves of this by plotting the two measurements against each other:
+#+begin_src ipython :session :ipyfile pot_vs_ref.svg :exports both :results none
+ref = df['Reference Distance (mm)']
+pot = df['Linear Potentiometer (V)']
+plt.ylabel('Reference Distance [mm]')
+plt.xlabel('Linear Potentiometer Voltage [V]')
+plt.plot(pot, ref)
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:pot_vs_ref
+#+CAPTION: Pot Voltage vs. Reference Distance
+[[file:pot_vs_ref.svg]]
+
+As shown in Figure [[fig:pot_vs_ref]], the two datasets have a roughly linear correlation.
+
+The geometry of the ramp profile is described in the lab manual, which we can use to relate the reference distance to the table location.
+#+begin_src ipython :session :ipyfile pot_vs_ref.svg :exports both :results raw drawer
+ramp_lower = 6.35  # mm
+ramp_upper = 17.6  # mm
+ramp_len = 203.2  # mm
+ramp_slope = (ramp_upper - ramp_lower)/ramp_len  # mm/mm
+ramp_slope  # reference distance (mm) / table position (mm)
+table_ref = ref / ramp_slope  # table position (mm)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[277]:
+:end:
+
+[fn:errata1] The lab manual says that the ramp profile was not used, this contradicts the actual data recieved and the video provided, I will assume this is an error.
+
+
+
+
+
+[fn:nooffset] The data provided actually starts with the dial indicator reading $\SI{0}{\milli\meter}$ as shown in Figure [[fig:pot_vs_ref]], and presumably the table started at the beginning of its travel, so no offset should need to be applied.
+
+
+
+
+
+*** Linear Regression
+The original data is a time series depicting the table starting at some position, and then travelling in increments until reaching some endpoint.
+We will find the average value and standard deviation of the reference and potentiometer values at each increment, then use that data to do a linear regression to get the calibration curve for the potentiomenter[fn:whatastupidfuckingidea].
+First, we need to find the points in time where the table was held still, we can do this by looking for sections where the derivative of the data is zero.
+#+begin_src ipython :session :exports both :results raw drawer
+# Consider values below threshold to be zero
+threshold = 0.15
+t = df['Time (s)']
+# Run reference signal through total variance filter
+# to reduce noise for differentiation
+ref_c = ptv.tv1_1d(ref, 0.5)
+dt = np.diff(t)
+dref = np.diff(ref_c)
+drdt = dref/dt
+
+# Search for locations where derivative is continuously zero
+iszero = np.where(drdt < threshold)[0]
+consec = np.array(
+    np.split(iszero, np.where(np.diff(iszero) != 1)[0]+1),
+    dtype=object)
+
+# Discard sections with low number of measurements
+consec = consec[[len(c) > 90 for c in consec]]
+consec = [(c[0], len(c)) for c in consec]
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[287]:
+:end:
+
+Now let's pull out the data at each increment[fn:youfuckingidiots] and calculate the average and standard deviation
+#+begin_src ipython :session :exports both :results raw drawer
+# Discard points at the beginning and end of each dataset
+# to avoid error caused by movement
+offset = 5
+
+avg = []
+for idx, l in consec:
+    idx += offset
+    l -= offset
+    t = table_ref[idx:idx + l]
+    p = pot[idx:idx + l]
+    avg.append((np.mean(t), np.std(t), np.mean(p), np.std(p)))
+avg_df = pd.DataFrame(
+    avg, columns=['tbl_avg', 'tbl_std', 'pot_avg', 'pot_std'])
+avg_df
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[288]:
+|    |   tbl_avg |   tbl_std |   pot_avg |     pot_std |
+|----+-----------+-----------+-----------+-------------|
+|  0 |   14.9916 | 0.0576977 |   5.95422 | 0.00878831  |
+|  1 |   31.6032 | 0.123535  |   5.62172 | 0.00894882  |
+|  2 |   50.7509 | 0.153772  |   5.21354 | 0.00767826  |
+|  3 |   76.5726 | 0.208803  |   4.62585 | 0.00660375  |
+|  4 |  104.62   | 0.334073  |   3.95959 | 0.00588091  |
+|  5 |  116.522  | 0.381264  |   3.666   | 0.00543617  |
+|  6 |  134.173  | 0.364633  |   3.21063 | 0.00378166  |
+|  7 |  155.36   | 0.411105  |   2.63813 | 0.00279725  |
+|  8 |  191.937  | 0.503211  |   1.57096 | 0.000958293 |
+:end:
+
+Now we can do a linear regression on our data:
+#+begin_src ipython :session :ipyfile pot_cal.svg :exports both :results none
+pot_avg = avg_df['pot_avg']
+tbl_avg = avg_df['tbl_avg']
+pot_std = avg_df['pot_std']
+tbl_std = avg_df['tbl_std']
+pot_range = np.linspace(min(pot_avg), max(pot_avg))
+# multiply standard deviances together to use as weight
+w = pot_std*tbl_std
+f = P.fit(pot_avg, tbl_avg,1, w=w)
+a, b = f.mapparms()
+f_name = f"y(v) = {a:.3f}*v + {b:.3f}"
+plt.errorbar(pot_avg, tbl_avg, xerr=2*pot_std, yerr=2*tbl_std, fmt='none')
+plt.plot(pot_range, f(pot_range))
+plt.ylabel('Table Position [mm]')
+plt.xlabel('Linear Potentiometer Voltage [V]')
+plt.text(min(pot_avg), min(tbl_avg), f_name)
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:pot_cal
+#+CAPTION: Calibrated Pot Voltage vs. Reference Distance
+[[file:pot_cal.svg]]
+
+
+[fn:whatastupidfuckingidea] Realistically it would be far simpler to just do a linear regression on the data in Figure [[fig:pot_vs_ref]], that should provide the same result and would sidestep the need to use the standard deviations to weight the regression.
+
+[fn:youfuckingidiots] Note that the dataset provided for the first increment at has very few data points and has been discarded
+
+** Nonlinearity error
+Since the uncertainty on all of our raw measurements is relatively low, it should be fine to ignore them when finding the nonlinearity.
+#+begin_src ipython :session :exports both :results raw drawer
+nonlin = np.abs(f(pot_avg) - tbl_avg)
+max(nonlin) # mm
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[298]:
+: 10.136958134076394
+:end:
+* Calibration and Application of the Proximity Sensors
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+First let's load in the provided data:
+#+begin_src ipython :session :exports both :results raw drawer
+# aluminum ramp profile
+alu_df = pd.read_csv('data/part_1.csv')
+# lexan sheet
+lex_df = pd.read_csv('data/part_2.csv')
+
+alu_ref = alu_df['Reference Distance (mm)']
+alu_pot = alu_df['Linear Potentiometer (V)']
+raw_alu_irs = alu_df['IR Sensor (V)']
+raw_alu_cap = alu_df['Capacitive Sensor (V)']
+raw_alu_edy = alu_df['Eddy Current Sensor (V)']
+raw_alu_led = alu_df['LED Sensor (V)']
+alu_tbl = f(alu_pot)
+
+lex_ref = lex_df['Reference Distance (mm)']
+lex_pot = lex_df['Linear Potentiometer (V)']
+raw_lex_irs = lex_df['IR Sensor (V)']
+raw_lex_cap = lex_df['Capacitive Sensor (V)']
+raw_lex_edy = lex_df['Eddy Current Sensor (V)']
+raw_lex_led = lex_df['LED Sensor (V)']
+lex_tbl = f(lex_pot)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[575]:
+:end:
+*** Plotting Provided Data
+Let's start by plotting the data for the aluminum ramp profile:
+#+begin_src ipython :session :ipyfile alu_ramp.svg :exports both :results none
+def plot_tbl_prof(tbl, ref, irs, cap, edy, led):
+    fig, ax1 = plt.subplots(figsize=(6.4, 5.5))
+    col = 'k'
+    ax1.set_xlabel('Table Position [mm]')
+    ax1.set_ylabel('Reference Distance [mm]', color=col)
+    p1 = ax1.plot(tbl, ref, color=col, label='Reference [mm]')
+    ax1.tick_params(axis='y', labelcolor=col)
+
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Sensor Voltage [V]')
+    p2 = ax2.plot(tbl, irs, label='IR [V]')
+    p3 = ax2.plot(tbl, cap, label='Capacitive [V]')
+    p4 = ax2.plot(tbl, edy, label='Eddy Current [V]')
+    p5 = ax2.plot(tbl, led, label='LED [V]')
+
+    ls = p1 + p2 + p3 + p4 + p5
+    lbls = [l.get_label() for l in ls]
+    ax1.legend(ls, lbls, ncol=3, bbox_to_anchor=(0.5, 1.15), loc='upper center')
+
+    fig.tight_layout()
+plot_tbl_prof(
+    alu_tbl, alu_ref, raw_alu_irs, raw_alu_cap, raw_alu_edy, raw_alu_led)
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:alu_ramp
+#+CAPTION: Sensor Output vs. Table Distance for Aluminum Ramp Profile
+[[file:alu_ramp.svg]]
+We can also plot the data for the Lexan sheet:
+#+begin_src ipython :session :ipyfile lex_step.svg :exports both :results none
+plot_tbl_prof(
+    lex_tbl, lex_ref, raw_lex_irs, raw_lex_cap, raw_lex_edy, raw_lex_led)
+#+end_src
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:lex_sheet
+#+CAPTION: Sensor Output vs. Table Distance for Lexan Sheet
+[[file:lex_step.svg]]
+Looking at Figures [[fig:alu_ramp]] and [[fig:lex_sheet]], and comparing with the lab manual/sensor datasheets, there appears to be a discrepancy between the lab manual's description of the test setup and the data.
+The lab manual suggests that the output of each sensor is directly connected to the amplifier, but the data seems be negatively proportional to what would normally be expected.
+This suggests that the sensing circuit is probably closer to something like Figure [[fig:sensor_circuit]]
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:sensor_circuit
+#+CAPTION: Likely amplifier configuration of lab setup.
+[[file:sensing_circuit.svg]]
+Assuming all of the resistors have the same value, this configuration would behave like:
+\begin{equation}
+V_\text{out} = V_{cc} - V_\text{sig}
+\end{equation}
+Assuming $V_{cc} = \SI{24}{\volt}$, we can solve for the original signal voltage $V_\text{sig}$:
+\begin{equation}
+V_\text{sig} = \SI{24}{\volt} - V_\text{out}
+\end{equation}
+Fixing our data, and regraphing each dataset:
+#+begin_src ipython :session :exports both :results raw drawer
+V_cc = 24  # V
+alu_irs = V_cc - alu_df['IR Sensor (V)']
+alu_cap = V_cc - alu_df['Capacitive Sensor (V)']
+alu_edy = V_cc - alu_df['Eddy Current Sensor (V)']
+alu_led = V_cc - alu_df['LED Sensor (V)']
+
+lex_irs = V_cc - lex_df['IR Sensor (V)']
+lex_cap = V_cc - lex_df['Capacitive Sensor (V)']
+lex_edy = V_cc - lex_df['Eddy Current Sensor (V)']
+lex_led = V_cc - lex_df['LED Sensor (V)']
+#+end_src
+
+#+begin_src ipython :session :ipyfile alu_step_fixed.svg :exports both :results none
+plot_tbl_prof(alu_tbl, alu_ref, alu_irs, alu_cap, alu_edy, alu_led)
+#+end_src
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:alu_sheet_fixed
+#+CAPTION: Fixed Sensor Output vs. Table Distance for Aluminum Ramp Profile
+[[file:alu_step_fixed.svg]]
+
+#+begin_src ipython :session :ipyfile lex_step_fixed.svg :exports both :results none
+plot_tbl_prof(lex_tbl, lex_ref, lex_irs, lex_cap, lex_edy, lex_led)
+#+end_src
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:lex_sheet_fixed
+#+CAPTION: Fixed Sensor Output vs. Table Distance for Lexan Sheet
+[[file:lex_step_fixed.svg]]
+*** IR Sensor Calibration
+The lab manual provides the following relation to describe the current output of the IR sensor.
+\begin{equation}
+I \appropto \frac{1}{x^2 + (s/2)^2}
+\end{equation}
+Where $x$ is the distance measured and $s$ is the spacing between the emitter and reciever.
+Because the emitter current path goes through a constant resistance, we can also say that the current is directly proportional to the voltage[fn:highz1].
+Therefore, the our calibration equation can be derived:
+\begin{align}
+V_\text{IR}(x) &\approx \frac{A}{x^2 + (s/2)^2} \\
+x^2 + (s/2)^2 &\approx \frac{A}{V_\text{IR}} \nonumber \\
+x(V_\text{IR}) &\approx \sqrt{\frac{A}{V_\text{IR}} - (s/2)^2}
+\end{align}
+Where $A$ will be some calibration constant for a specific material
+
+However, this relation suggests that we would expect a lower voltage for a longer distance, which is obviously not the case in as shown in Figures [[fig:alu_ramp]] and [[fig:lex_sheet]]
+Instead, observation of the data shows that the calibration curve is most likely in the form:
+\begin{align}
+V_\text{IR}(x) &= A x^B + C \label{eq:v_ir_x} \\
+x^B &= \frac{V_\text{IR} - C}{A} \nonumber \\
+x(V_\text{IR}) &= \left(\frac{V_\text{IR} - C}{A}\right)^{1/B}
+\end{align}
+
+Let's first define our fitting function
+#+begin_src ipython :session :exports both :results raw drawer
+# Solver doesn't seem to try negative values of A
+def v_ir(x, A, B, C):
+    return -A*x**B + C
+
+def v_ir_name(name, A, B, C):
+    return f'V_ir_{name}(x) = {-A:.3f}x^{B:.3f} + {C:.3f}'
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[600]:
+:end:
+
+Now we can fit our data to it and plot the results:
+#+begin_src ipython :session :ipyfile irs_cf.svg :exports both :results none
+a_popt_irs, _ = scipy.optimize.curve_fit(v_ir, alu_ref, alu_irs)
+l_popt_irs, _ = scipy.optimize.curve_fit(v_ir, lex_ref, lex_irs)
+
+fig, axs = plt.subplots(2)
+axs[0].scatter(lex_ref, lex_irs,
+               color='b', label='Lexan Data')
+axs[0].plot(lex_ref, v_ir(lex_ref, *l_popt_irs),
+            color='r', label='Lexan Calibration')
+axs[0].set(ylabel='Sensor Voltage [V]')
+axs[0].text(min(lex_ref), min(lex_irs), v_ir_name('lex', *l_popt_irs))
+axs[0].legend(loc=(0.01, 0.4))
+axs[1].scatter(alu_ref, alu_irs,
+               color='c', label='Aluminum Data')
+axs[1].plot(alu_ref, v_ir(alu_ref, *a_popt_irs),
+            color='m', label='Aluminum Calibration')
+axs[1].text(min(alu_ref), min(alu_irs), v_ir_name('alu', *a_popt_irs))
+axs[1].legend(loc=(0.01, 0.4))
+axs[1].set(ylabel='Sensor Voltage [V]')
+axs[1].set(xlabel='Reference Distance [mm]')
+#+end_src
+
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:irs_cf
+#+CAPTION: IR Sensor Voltage vs. Reference Distance for Lexan and Aluminum
+[[file:irs_cf.svg]]
+
+The fits appear to be good, which means there is some discrepancy between our measurements and what the datasheet indicates.
+There is a small chance that the data only spans the peak reigion of the output graphs in the datasheet, but this seems rather unlikely given the total travel of the the profile.
+
+
+[fn:highz1] Assuming that the output is connected to an input with sufficiently high impedance.
+
+*** LED Sensor Calibration
+Within it's operational range, the LED sensor has a roughly linear output.
+Therefore, our calibration curve will be in the form[fn:notenoughleddata]:
+\begin{align}
+V_\text{LED}(x) &=
+\begin{cases}
+AC + B & \text{if $x \le C$} \\ 
+Ax + B & \text{if $C < x < D$} \\
+AD + B & \text{if $x \ge D$} \\
+\end{cases} \\
+x(V_\text{LED}) &= \frac{V_\text{LED} - B}{A} & \text{if $C < x < D$}
+\end{align}
+Let's first define our fitting function
+#+begin_src ipython :session :exports both :results raw drawer
+def _v_led(x, A, B, C):
+    if x < C:
+        return A*C + B
+    return A*x + B;
+
+_v_led_vec = np.vectorize(_v_led)
+def v_led(x, A, B, C):
+    return _v_led_vec(x, A, B, C)
+
+def v_led_name(name, A, B, C):
+    return f'V_led_{name}(x) = {A:.3f}x + {B:.3f}, x > {C:.3f}'
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[602]:
+:end:
+
+Now we can fit our data to it and plot the results:
+#+begin_src ipython :session :ipyfile led_cf.svg :exports both :results none
+a_popt_led, _ = scipy.optimize.curve_fit(v_led, alu_ref, alu_led)
+l_popt_led, _ = scipy.optimize.curve_fit(v_led, lex_ref, lex_led)
+
+fig, axs = plt.subplots(2)
+axs[0].scatter(lex_ref, lex_led,
+               color='b', label='Lexan Data')
+axs[0].plot(lex_ref, v_led(lex_ref, *l_popt_led),
+            color='r', label='Lexan Calibration')
+axs[0].set(ylabel='Sensor Voltage [V]')
+axs[0].text(min(lex_ref), 0.999*max(lex_led), v_led_name('lex', *l_popt_led))
+axs[0].legend(loc=(0.01, 0.3))
+axs[1].scatter(alu_ref, alu_led,
+               color='c', label='Aluminum Data')
+axs[1].plot(alu_ref, v_led(alu_ref, *a_popt_led),
+            color='m', label='Aluminum Calibration')
+axs[1].text(min(alu_ref), 0.99*max(alu_led), v_led_name('alu', *a_popt_led))
+axs[1].legend(loc=(0.01, 0.3))
+axs[1].set(ylabel='Sensor Voltage [V]')
+axs[1].set(xlabel='Reference Distance [mm]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:led_cf
+#+CAPTION: LED Sensor Voltage vs. Reference Distance for Lexan and Aluminum
+[[file:led_cf.svg]]
+The fits appear to be good, which means the data seems to agree with the datasheet.
+[fn:notenoughleddata] Because there are no measurements for $x \ge D$, I will not take that portion of the curve into account when fitting.
+
+
+
+
+*** Eddy Current Sensor Discussion
+In Figure  [[fig:lex_sheet_fixed]], there is no response, this is expected because Lexan is not conductive and there will be no significant eddy currents generated for the sensor to detect.
+
+In Figure [[fig:alu_sheet_fixed]], the sensor is able to detect the aluminum, but it appears that its position was set too far away from the profile to get good data across its output range.
+
+*** Capacitve Sensor Discussion
+The datasheet shows that this sensor acts as a normally open switch.
+I assume normally open means open when there is nothing detected by the sensor.
+Since both profile materials can be detected by this sensor and the TAs recalibrated it's location to make sure it triggered during data collection, the transition point can be seen in both Figures [[fig:lex_sheet_fixed]] and [[fig:alu_sheet_fixed]]
+
+*** Sensor Applications for Detecting Objects on a Conveyor Belt
+**** Detecting presence of a conductive object.
+Assuming the objects are of relatively similar height, it should be sufficient to use an eddy current sensor mounted such that the nominal sensing distance lines up with the nominal height of the objects.
+This also assumes that the conveyor belt itself will not interfere with the sensor, either by being non-conductive or the objects being tall enough that there is a distinct change in output when an object is present.
+**** Determining the thickness of an opaque object.
+If the range of thicknesses required is relatively small, it should be sufficient to use an optical sensor such as an LED or IR sensor mounted in a way that maximizes their usable range.
+If the thickness range exceeds that of a single optical sensor, it may be better to use a capacitive switch mounted on a linear stage which can approach the object from some reference point until the switch triggers to measure the thickness.
+* Additional Exercises
+** Sensor Prices
+| Sensor                      | Price (single unit) | Source            |
+|-----------------------------+---------------------+-------------------|
+| OPB704 IR Sensor            | $4.10 (USD)         | [[https://www.digikey.ca/en/products/detail/tt-electronics-optek-technology/OPB704/498713][Digikey]]           |
+| Z4W-V LED Sensor            | $1,577.71 (USD)     | [[https://www.mouser.ca/ProductDetail/Omron-Automation-and-Safety/Z4W-V25R?qs=NA0XKeglvRX6O%2FDjmCKY0Q==][Mouser]]            |
+| AK9-10 Eddy Current Sensor  | Discontinued        | [[https://www.automationdirect.com/adc/shopping/catalog/retired_products/sensors_-z-_encoders/ak9-10-1h][Automation Direct]] |
+| CT1-AN-1A Capacitive Switch | $77.00 (USD)        | [[https://www.automationdirect.com/adc/shopping/catalog/retired_products/sensors_-z-_encoders/ak9-10-1h][Automation Direct]] |
+** Sensor Datasheets
+| Sensor                      | Datasheet Source  |
+|-----------------------------+-------------------|
+| OPB704 IR Sensor            | [[https://www.ttelectronics.com/TTElectronics/media/ProductFiles/Optoelectronics/Datasheets/OPB703-70_70A-70F-B-704.pdf][TT Electronics]]    |
+| Z4W-V LED Sensor            | [[http://www.ia.omron.com/data_pdf/cat/z4w-v_e217-e1_3_1_csm1402.pdf][Omron]]             |
+| AK9-10 Eddy Current Sensor  | [[https://cdn.automationdirect.com/static/specs/oldspec/prox18mmanalogak_02_13.pdf][Automation Direct]] |
+| CT1-AN-1A Capacitive Switch | [[https://cdn.automationdirect.com/static/specs/proxctm30metal.pdf][Automation Direct]] |
+*** Suitability to measure between \SI{0}{\milli\meter} and \SI{10}{\milli\meter}
+I am assuming that \SI{0}{\milli\meter} doesn't mean the object is touching the sensor, since the sensor can just be moved away from the reference zero location.
+**** IR Sensor:
+From the datasheet, distances between \SI{0.25}{\inch} and \SI{0.5}{\inch} appear fairly linear.
+If some linearization is applied to the output then the non-linear sections can be used to sense a range greater than $\SI{0.4}{\inch} \approx \SI{10}{\milli\meter}$.
+**** LED Sensor:
+The datasheet lists a measurement range of $\pm \SI{4}{\milli\meter}$, which is not wide enough for our requirement.
+**** Eddy Current Sensor:
+The datasheet lists a nominal measurement range of 0 to \SI{10}{\milli\meter}, which just meets our requirements.
+Realistically testing should be done to make sure the sensor can reliably make measure at its extremes.
+**** Capacitive Switch:
+This sensor does not output an analog signal, it simply outputs a boolean value depending on whether an object is in range.
+However, a switch like this could be combined with a linear stage to sense a wide range of distances.
+** Linear Potentiometer Wiring Diagram
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:pot_vs_ref
+#+CAPTION: Wiring diagram for the Linear Potentiometer and DAQ interface
+[[file:lin_pot_circuit.svg]]
+
+** Nonlinearity Sources
+The nominal measurement range of a sensor has no relation to the linearity of a sensor, it just represents the range past which you can no longer get discernable outputs from the sensor.
+
+For sensors that measure the intensity of a reflected signal (optical, IR, etc), the intensity of the transmitted signal drops off according to the inverse square law plus the attenuation of the reflecting material.
+
+The capacitance change of a capacitive sensor is also highly non-linear.
+The geometry of the sensor capacitor plates plus sensed object is complex and likely does not have an analytical solution[fn:capwiki].
+An inductive sensor would be non-linear for similar reasons.
+
+The nonlinearity of a sensor can be mitigated by finding an equation to linearize the output and calibrating the sensor to find any constants required.
+
+
+[fn:capwiki] https://en.wikipedia.org/wiki/Capacitance#Capacitance_of_conductors_with_simple_shapes
+
+
+
+
+
+
+
+
+
+
+
+
+
+

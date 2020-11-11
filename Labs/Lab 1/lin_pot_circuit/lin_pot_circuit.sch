@@ -1,0 +1,128 @@
+EESchema Schematic File Version 4
+EELAYER 30 0
+EELAYER END
+$Descr A4 11693 8268
+encoding utf-8
+Sheet 1 1
+Title ""
+Date ""
+Rev ""
+Comp ""
+Comment1 ""
+Comment2 ""
+Comment3 ""
+Comment4 ""
+$EndDescr
+$Comp
+L Device:R_POT RV1
+U 1 1 5FAB8B36
+P 2000 3200
+F 0 "RV1" H 1931 3246 50  0000 R CNN
+F 1 "R_POT" H 1931 3155 50  0000 R CNN
+F 2 "" H 2000 3200 50  0001 C CNN
+F 3 "~" H 2000 3200 50  0001 C CNN
+	1    2000 3200
+	1    0    0    -1  
+$EndComp
+$Comp
+L power:GND #PWR02
+U 1 1 5FABA6C4
+P 2700 3800
+F 0 "#PWR02" H 2700 3550 50  0001 C CNN
+F 1 "GND" H 2705 3627 50  0000 C CNN
+F 2 "" H 2700 3800 50  0001 C CNN
+F 3 "" H 2700 3800 50  0001 C CNN
+	1    2700 3800
+	1    0    0    -1  
+$EndComp
+$Comp
+L lin_pot_circuit:DAQ_INTERFACE DAQ1
+U 1 1 5FABC459
+P 3450 3650
+F 0 "DAQ1" H 3450 2700 50  0000 C CNN
+F 1 "DAQ_INTERFACE" H 3450 2800 50  0000 C CNN
+F 2 "" H 3200 3800 50  0001 C CNN
+F 3 "" H 3200 3800 50  0001 C CNN
+	1    3450 3650
+	1    0    0    1   
+$EndComp
+Wire Wire Line
+	2150 3200 2350 3200
+Wire Wire Line
+	2350 3200 2350 2900
+Wire Wire Line
+	2350 2900 2850 2900
+NoConn ~ 2850 3000
+Wire Wire Line
+	2850 3200 2750 3200
+Wire Wire Line
+	2750 3200 2750 2850
+Wire Wire Line
+	2750 2850 2000 2850
+Wire Wire Line
+	2000 2850 2000 3050
+$Comp
+L power:+10V #PWR03
+U 1 1 5FABFC62
+P 2750 2750
+F 0 "#PWR03" H 2750 2600 50  0001 C CNN
+F 1 "+10V" H 2765 2923 50  0000 C CNN
+F 2 "" H 2750 2750 50  0001 C CNN
+F 3 "" H 2750 2750 50  0001 C CNN
+	1    2750 2750
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	2750 2750 2750 2850
+Connection ~ 2750 2850
+NoConn ~ 2850 3300
+NoConn ~ 2850 3400
+$Comp
+L power:+24V #PWR01
+U 1 1 5FAC046A
+P 2500 2750
+F 0 "#PWR01" H 2500 2600 50  0001 C CNN
+F 1 "+24V" H 2515 2923 50  0000 C CNN
+F 2 "" H 2500 2750 50  0001 C CNN
+F 3 "" H 2500 2750 50  0001 C CNN
+	1    2500 2750
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	2850 3500 2500 3500
+Wire Wire Line
+	2500 3500 2500 2750
+Wire Wire Line
+	2000 3350 2000 3600
+Wire Wire Line
+	2000 3600 2700 3600
+Wire Wire Line
+	2700 3700 2700 3600
+Connection ~ 2700 3600
+Wire Wire Line
+	2700 3600 2850 3600
+Wire Wire Line
+	2850 3100 2700 3100
+Wire Wire Line
+	2700 3100 2700 3600
+$Comp
+L lin_pot_circuit:PCI-6211 PCI1
+U 1 1 5FAC2A20
+P 4750 3400
+F 0 "PCI1" H 4300 3550 50  0000 L CNN
+F 1 "PCI-6211" H 4300 3450 50  0000 L CNN
+F 2 "" H 4550 3450 50  0001 C CNN
+F 3 "" H 4550 3450 50  0001 C CNN
+	1    4750 3400
+	1    0    0    -1  
+$EndComp
+Wire Wire Line
+	4100 3600 4100 3700
+Wire Wire Line
+	4100 3700 2700 3700
+Wire Wire Line
+	2700 3800 2700 3700
+Connection ~ 2700 3700
+Wire Wire Line
+	4200 3500 4100 3500
+$EndSCHEMATC

@@ -1,0 +1,4 @@
+(sym_lib_table
+  (lib (name lin_pot_circuit)(type Legacy)(uri ${KIPRJMOD}/lin_pot_circuit.lib)(options "")(descr ""))
+  (lib (name lin_pot_circuit-rescue)(type Legacy)(uri ${KIPRJMOD}/lin_pot_circuit-rescue.lib)(options "")(descr ""))
+)

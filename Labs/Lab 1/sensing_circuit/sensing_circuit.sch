@@ -1,0 +1,188 @@
+EESchema Schematic File Version 4
+EELAYER 30 0
+EELAYER END
+$Descr A4 11693 8268
+encoding utf-8
+Sheet 1 1
+Title ""
+Date ""
+Rev ""
+Comp ""
+Comment1 ""
+Comment2 ""
+Comment3 ""
+Comment4 ""
+$EndDescr
+$Comp
+L Device:Opamp_Dual_Generic U1
+U 1 1 5FAB6EB1
+P 3200 3750
+F 0 "U1" H 3200 4025 50  0000 C CNN
+F 1 "Opamp_Dual_Generic" H 3200 4026 50  0001 C CNN
+F 2 "" H 3200 3750 50  0001 C CNN
+F 3 "~" H 3200 3750 50  0001 C CNN
+	1    3200 3750
+	1    0    0    -1  
+$EndComp
+$Comp
+L power:VCC #PWR0101
+U 1 1 5FAB772D
+P 2300 3400
+F 0 "#PWR0101" H 2300 3250 50  0001 C CNN
+F 1 "VCC" H 2315 3573 50  0000 C CNN
+F 2 "" H 2300 3400 50  0001 C CNN
+F 3 "" H 2300 3400 50  0001 C CNN
+	1    2300 3400
+	1    0    0    -1  
+$EndComp
+$Comp
+L power:GND #PWR0102
+U 1 1 5FAB7B46
+P 2300 4500
+F 0 "#PWR0102" H 2300 4250 50  0001 C CNN
+F 1 "GND" H 2305 4327 50  0000 C CNN
+F 2 "" H 2300 4500 50  0001 C CNN
+F 3 "" H 2300 4500 50  0001 C CNN
+	1    2300 4500
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:R R2
+U 1 1 5FAB8218
+P 2300 4250
+F 0 "R2" H 2370 4250 50  0000 L CNN
+F 1 "R" H 2370 4205 50  0001 L CNN
+F 2 "" V 2230 4250 50  0001 C CNN
+F 3 "~" H 2300 4250 50  0001 C CNN
+	1    2300 4250
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:R R3
+U 1 1 5FAB8A96
+P 2550 3500
+F 0 "R3" V 2435 3500 50  0000 C CNN
+F 1 "R" H 2620 3455 50  0001 L CNN
+F 2 "" V 2480 3500 50  0001 C CNN
+F 3 "~" H 2550 3500 50  0001 C CNN
+	1    2550 3500
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:R R1
+U 1 1 5FAB99A9
+P 2300 3750
+F 0 "R1" H 2230 3750 50  0000 R CNN
+F 1 "R" H 2370 3705 50  0001 L CNN
+F 2 "" V 2230 3750 50  0001 C CNN
+F 3 "~" H 2300 3750 50  0001 C CNN
+	1    2300 3750
+	-1   0    0    1   
+$EndComp
+$Comp
+L Device:R R4
+U 1 1 5FABA5D7
+P 2550 4000
+F 0 "R4" V 2665 4000 50  0000 C CNN
+F 1 "R" H 2620 3955 50  0001 L CNN
+F 2 "" V 2480 4000 50  0001 C CNN
+F 3 "~" H 2550 4000 50  0001 C CNN
+	1    2550 4000
+	0    -1   -1   0   
+$EndComp
+$Comp
+L Device:R R5
+U 1 1 5FABC013
+P 2800 3250
+F 0 "R5" H 2730 3250 50  0000 R CNN
+F 1 "R" H 2870 3205 50  0001 L CNN
+F 2 "" V 2730 3250 50  0001 C CNN
+F 3 "~" H 2800 3250 50  0001 C CNN
+	1    2800 3250
+	-1   0    0    1   
+$EndComp
+$Comp
+L Device:R R6
+U 1 1 5FABCF29
+P 3050 4150
+F 0 "R6" V 3165 4150 50  0000 C CNN
+F 1 "R" H 3120 4105 50  0001 L CNN
+F 2 "" V 2980 4150 50  0001 C CNN
+F 3 "~" H 3050 4150 50  0001 C CNN
+	1    3050 4150
+	0    -1   -1   0   
+$EndComp
+Wire Wire Line
+	2300 3400 2300 3500
+Wire Wire Line
+	2700 3500 2800 3500
+Wire Wire Line
+	2800 3500 2800 3650
+Wire Wire Line
+	2800 3650 2900 3650
+Wire Wire Line
+	2700 4000 2800 4000
+Wire Wire Line
+	2800 4000 2800 3850
+Wire Wire Line
+	2800 3850 2900 3850
+Wire Wire Line
+	2800 3400 2800 3500
+Connection ~ 2800 3500
+Wire Wire Line
+	2900 4150 2800 4150
+Wire Wire Line
+	2800 4150 2800 4000
+Connection ~ 2800 4000
+Wire Wire Line
+	2400 4000 2300 4000
+Wire Wire Line
+	2300 4000 2300 4100
+Wire Wire Line
+	2300 3900 2300 4000
+Connection ~ 2300 4000
+Wire Wire Line
+	2300 4500 2300 4450
+Wire Wire Line
+	2400 3500 2300 3500
+Connection ~ 2300 3500
+Wire Wire Line
+	2300 3500 2300 3600
+$Comp
+L power:GND #PWR0103
+U 1 1 5FABE3BD
+P 2800 3000
+F 0 "#PWR0103" H 2800 2750 50  0001 C CNN
+F 1 "GND" H 2805 2827 50  0000 C CNN
+F 2 "" H 2800 3000 50  0001 C CNN
+F 3 "" H 2800 3000 50  0001 C CNN
+	1    2800 3000
+	-1   0    0    1   
+$EndComp
+Wire Wire Line
+	2800 3100 2800 3000
+Wire Wire Line
+	3200 4150 3600 4150
+Wire Wire Line
+	3600 4150 3600 3750
+Wire Wire Line
+	3600 3750 3500 3750
+Wire Wire Line
+	3600 3750 3700 3750
+Connection ~ 3600 3750
+Text GLabel 3700 3750 2    50   Input ~ 0
+V_OUT
+Text Notes 3600 3650 0    50   ~ 0
+To filtering and other \nconditioning equipment\n
+Wire Wire Line
+	2300 4000 2150 4000
+Wire Wire Line
+	2300 4450 2150 4450
+Connection ~ 2300 4450
+Wire Wire Line
+	2300 4450 2300 4400
+Text GLabel 2150 4000 0    50   Input ~ 0
+SIGNAL+
+Text GLabel 2150 4450 0    50   Input ~ 0
+SIGNAL-
+$EndSCHEMATC
