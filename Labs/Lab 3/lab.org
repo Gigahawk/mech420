@@ -1,0 +1,729 @@
+#+TITLE: MECH 420 Lab 3
+#+AUTHOR: Jasper Chan - 37467164 @@latex:\\@@ jasperchan515@gmail.com
+
+#+OPTIONS: title:nil toc:nil
+
+#+LATEX_HEADER: \definecolor{bg}{rgb}{0.95,0.95,0.95}
+#+LATEX_HEADER: \setminted{frame=single,bgcolor=bg,samepage=true}
+#+LATEX_HEADER: \setlength{\parindent}{0pt}
+#+LATEX_HEADER: \usepackage{float}
+#+LATEX_HEADER: \usepackage{svg}
+#+LATEX_HEADER: \usepackage{cancel}
+#+LATEX_HEADER: \usepackage{amssymb}
+#+LATEX_HEADER: \usepackage{mathtools, nccmath}
+#+LATEX_HEADER: \DeclareSIUnit\inch{in}
+#+LATEX_HEADER: \sisetup{per-mode=fraction}
+#+LATEX_HEADER: \newcommand{\Lwrap}[1]{\left\{#1\right\}}
+#+LATEX_HEADER: \newcommand{\Lagr}[1]{\mathcal{L}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Lagri}[1]{\mathcal{L}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztrans}[1]{\mathcal{Z}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztransi}[1]{\mathcal{Z}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\ZOH}[1]{\text{ZOH}\left(#1\right)}
+#+LATEX_HEADER: \newcommand{\approptoinn}[2]{\mathrel{\vcenter{\offinterlineskip\halign{\hfil$##$\cr#1\propto\cr\noalign{\kern2pt}#1\sim\cr\noalign{\kern-2pt}}}}}
+#+LATEX_HEADER: \newcommand{\appropto}{\mathpalette\approptoinn\relax}
+
+#+BEGIN_EXPORT latex
+\makeatletter
+\begin{titlepage}
+\begin{center}
+\vspace*{2in}
+{\Large \@title \par}
+\vspace{1in}
+{\Large \@author \par}
+\vspace{3in}
+{\large \@date}
+\end{center}
+\end{titlepage}
+\makeatother
+#+END_EXPORT
+
+
+\tableofcontents
+
+#+begin_src ipython :session :results raw drawer :exports none
+import numpy as np
+import scipy.optimize
+import scipy.fftpack
+from scipy.integrate import cumtrapz
+from scipy import signal
+from numpy.polynomial.polynomial import Polynomial as P
+import pandas as pd
+import matplotlib
+from matplotlib import pyplot as plt
+import prox_tv as ptv
+from IPython.display import set_matplotlib_formats
+%matplotlib inline
+set_matplotlib_formats('svg')
+matplotlib.rcParams.update({
+    'errorbar.capsize': 2})
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[866]:
+:end:
+
+#+begin_src ipython :session :results raw drawer :exports none
+import IPython
+from tabulate import tabulate
+
+class OrgFormatter(IPython.core.formatters.BaseFormatter):
+    def __call__(self, obj):
+        if(isinstance(obj, str)):
+            return None
+        try:
+            return tabulate(obj, headers='keys',
+                            tablefmt='orgtbl', showindex='always')
+        except:
+            return None
+
+ip = get_ipython()
+ip.display_formatter.formatters['text/org'] = OrgFormatter()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[2]:
+:end:
+
+
+
+Note: when not specified, all units are SI without prefixes.
+* Calibration of the Rotary Potentiometer and the LVDT
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+*** Output Averages
+First let's load in the provided data:
+#+begin_src ipython :session :exports both :results raw drawer
+df = pd.read_csv('data/lab3_A.csv')
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1102]:
+:end:
+
+The data comes unsorted, let's fix that:
+#+begin_src ipython :session :exports both :results raw drawer
+df = df_a.sort_values(by='Position (Counts)', ignore_index=True)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1103]:
+:end:
+
+Now we can find the averages at each position
+#+begin_src ipython :session :exports both :results raw drawer
+num_meas = 10
+cols = ['pos', 'pot_avg', 'pot_std',
+        'lvdt_avg', 'lvdt_std']
+df_avg = pd.DataFrame(columns=cols)
+def extract_row(s):
+    pot = s['Potentiometer  (Volts)']
+    lvdt = s['LVDT  (Volts)']
+    return pot, lvdt
+
+for i in range(round(len(df)/num_meas)):
+    pos = (i + 1)*150
+    rows = df[i*10:(i + 1)*10]
+    pot_avg, lvdt_avg = extract_row(rows.mean())
+    pot_std, lvdt_std = extract_row(rows.std())
+    row = np.array([pos, pot_avg, pot_std,
+                    lvdt_avg, lvdt_std])
+    df_avg = df_avg.append(
+        pd.DataFrame(row.reshape(1,-1), columns=cols),
+        ignore_index=True)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1104]:
+:end:
+
+Converting the positions from counts to $\si{\milli\meter}$:
+#+begin_src ipython :session :exports both :results raw drawer
+# Values from prelab
+teeth = 20  # teeth/rev on pulley
+pitch = 10  # mm/tooth, tooth pitch on pulley
+count = 1440  # counts/rev on encoder
+conv = teeth*pitch/count  # mm/count
+df_avg['pos_mm'] = df_avg['pos']*conv
+df_avg
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1105]:
+|    |   pos |   pot_avg |    pot_std |   lvdt_avg |   lvdt_std |   pos_mm |
+|----+-------+-----------+------------+------------+------------+----------|
+|  0 |   150 |   7.84585 | 0.00315639 |    9.56687 |  0.0202461 |  20.8333 |
+|  1 |   300 |   7.47743 | 0.00432359 |    8.87567 |  0.0140676 |  41.6667 |
+|  2 |   450 |   7.11606 | 0.00169457 |    8.16764 |  0.0109613 |  62.5    |
+|  3 |   600 |   6.75152 | 0.00134148 |    7.44022 |  0.0176631 |  83.3333 |
+|  4 |   750 |   6.39387 | 0.00340785 |    6.74202 |  0.0115341 | 104.167  |
+|  5 |   900 |   6.02281 | 0.00289883 |    6.00393 |  0.0107975 | 125      |
+|  6 |  1050 |   5.66002 | 0.00508436 |    5.28382 |  0.0137484 | 145.833  |
+|  7 |  1200 |   5.28372 | 0.00372075 |    4.56659 |  0.0149317 | 166.667  |
+|  8 |  1350 |   4.91799 | 0.00459745 |    3.85121 |  0.0141864 | 187.5    |
+|  9 |  1500 |   4.54347 | 0.00288099 |    3.11761 |  0.0176822 | 208.333  |
+:end:
+*** Calibration Fit
+Fitting each dataset:
+#+begin_src ipython :session :exports both :results raw drawer
+pos = df_avg['pos_mm']
+pot_avg = df_avg['pot_avg']
+pot_std = df_avg['pot_std']
+lvdt_avg = df_avg['lvdt_avg']
+lvdt_std = df_avg['lvdt_std']
+x_pot = P.fit(pot_avg, pos, 1, w=pot_std**2)
+x_lvdt = P.fit(lvdt_avg, pos, 1, w=lvdt_std**2)
+b_p, a_p = x_pot.convert().coef
+b_l, a_l = x_lvdt.convert().coef
+f_name_pot = f'$x_{{pot}}(V) = ${a_p:.3f}$\cdot V + ${b_p:.1f}'
+f_name_lvdt = f'$x_{{lvdt}}(V) = ${a_l:.3f}$\cdot V + ${b_l:.1f}'
+f_name = f'{f_name_pot}\n{f_name_lvdt}'
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1106]:
+:end:
+
+Plotting our fit and averaged data:
+#+begin_src ipython :session :ipyfile pot_lvdt_fit.svg :exports code :results none
+plt.plot(pot_avg, x_pot(pot_avg), label='Potentiometer Fit')
+plt.plot(lvdt_avg, x_lvdt(lvdt_avg), label='LVDT Fit')
+plt.scatter(pot_avg, pos, label='Potentiometer Data')
+plt.scatter(lvdt_avg, pos, label='LVDT Data')
+plt.xlabel('Sensor Output [V]')
+plt.ylabel('Position [mm]')
+plt.text(min(lvdt_avg), min(pos), f_name)
+plt.legend()
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:pot_lvdt_fit
+#+CAPTION: Calibration fit for the LVDT and Potentiometer Data
+[[file:pot_lvdt_fit.svg]]
+* Calibration of the DC Tachometer
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+*** Finding Velocity from Position
+First let's load in the provided data:
+#+begin_src ipython :session :exports both :results raw drawer
+df = pd.read_csv('data/lab3_B.csv')
+# Some values are NaN, replace with 0
+df = df.fillna(0)
+t = np.array(df['Time (s)'])
+pos = np.array(x_pot(df['Potentiometer (V)']))
+tach = np.array(df['Tachometer (V)'])
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1109]:
+:end:
+
+If we take a close look at the potentiometer data, we can see that there is noise throughout the data:
+#+begin_src ipython :session :ipyfile pot_pos_zoom1.svg :exports code :results none
+def plot_zoomed(t, p, l=None):
+    ax1 = plt.subplot(1, 2, 1, label='zoom1')
+    plt.plot(t, p, linewidth=1, label=l)
+    plt.ylim((274, 277))
+    plt.xlim((1.75, 2.75))
+    plt.ylabel('Position [mm]')
+    plt.xlabel('Time [s]')
+    plt.subplot(1, 2, 2, label='zoom2')
+    plt.plot(t, p, linewidth=1, label=l)
+    plt.ylim((30, 50))
+    plt.xlim((4, 5.1))
+    plt.xlabel('Time [s]')
+    plt.tight_layout()
+    return ax1
+plot_zoomed(t, pos)
+#+end_src
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:pot_pos_zoom1
+#+CAPTION: Zoomed Plots of Potentiometer Data
+[[file:pot_pos_zoom1.svg]]
+
+Noise in the data will be exacerbated by numerical differentiation.
+Let's filter the data with a low pass Butterworth filter and plot those areas again to check:
+#+begin_src ipython :session :ipyfile pot_pos_zoom2.svg :exports code :results none
+f_max = 10  # Hz, cutoff frequency
+f_sample = 1/(t[1] - t[0])  # Sample frequency
+f_n = f_sample/2  # Nyquist frequency
+
+b, a = signal.butter(10, f_max/f_n)
+pos_f = signal.filtfilt(b, a, pos)
+plot_zoomed(t, pos, l='Original')
+ax1 = plot_zoomed(t, pos_f, l='Filtered')
+ax1.legend()
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:pot_pos_zoom2
+#+CAPTION: Zoomed Plots of Raw and Filtered Potentiometer Data
+[[file:pot_pos_zoom2.svg]]
+
+Now let's take the derivative of our data:
+#+begin_src ipython :session :ipyfile pot_vel.svg :exports code :results none
+vel_uf = np.gradient(pos, t)
+vel = np.gradient(pos_f, t)
+plt.plot(t, vel_uf, label='Velocity (unfiltered)')
+plt.plot(t, vel, label='Velocity')
+plt.ylabel('Velocity [mm/s]')
+plt.xlabel('Time [s]')
+plt.legend(bbox_to_anchor=(0, 1.2), loc='upper left')
+#+end_src
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:pot_vel
+#+CAPTION: Potentiometer Velocity Over Time
+[[file:pot_vel.svg]]
+
+As shown in Figure [[fig:pot_vel]] the filtering greatly reduces the noise of the numerical differentiation.
+*** DC Tachometer and Potentiometer Velocity Averages
+We are only really interested in the positive constant portions of the graph in Figure [[fig:pot_vel]].
+Let's start by zeroing all of the portions of the graph between the test data we're interested in:
+#+begin_src ipython :session :exports both :results raw drawer
+vel_f = vel.clip(min=0)
+tach_f = signal.filtfilt(b, a, tach)
+tach_f = tach_f.clip(min=0)
+thresh = 100  # mm/s, threshold to remove data
+tach_thresh = 0.17  # V, threshold to remove data
+# Remove values below threshold
+vel_f[vel_f < thresh] = 0
+tach_f[tach_f < tach_thresh] = 0
+
+# Remaining spikes will be very short,
+# shrink below threshold with a rolling average
+N = 60
+vel_rf = np.concatenate(
+    (np.convolve(vel_f, np.ones(N)/N, mode='valid'),
+     np.zeros(N-1)))
+N = 90
+tach_rf = np.concatenate(
+    (np.convolve(tach_f, np.ones(N)/N, mode='valid'),
+     np.zeros(N-1)))
+# Remove values below threshold
+vel_f[vel_rf < thresh] = 0
+tach_f[tach_rf < tach_thresh] = 0
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1039]:
+:end:
+The data itself is still pretty noisy, but we can mostly take care of it using a total variance filter
+#+begin_src ipython :session :ipyfile vel_iso1.svg :exports code :results none
+vel_c = ptv.tv1_1d(vel_f, 400)
+plt.plot(t, vel_f, label='Isolated Data')
+plt.plot(t, vel_c, label='TV-Filtered Data')
+plt.legend()
+plt.xlabel('Time [s]')
+plt.ylabel('Velocity [mm/s]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:vel_iso1
+#+CAPTION: Potentiometer Velocity Over Time
+[[file:vel_iso1.svg]]
+
+#+begin_src ipython :session :ipyfile tach_iso1.svg :exports code :results none
+tach_c = ptv.tv1_1d(tach_f, 0.8)
+plt.plot(t, tach_f, label='Isolated Data')
+plt.plot(t, tach_c, label='TV-Filtered Data')
+plt.legend()
+plt.xlabel('Time [s]')
+plt.ylabel('Tachometer Voltage [V]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:tach_iso1
+#+CAPTION: Tachometer Voltage Over Time
+[[file:tach_iso1.svg]]
+
+We can see now that only the areas of interest are left in the data, however all of the tests are combined in one time series.
+Let's split up each test into a separate dataset for easier processing.
+#+begin_src ipython :session :ipyfile vel_iso2.svg :exports code :results none
+# Remove time between tests for better graph
+test_iv = 5  # s, interval between each test
+test_ln = 1.75  # s, length of each test
+num_tests = 10  # Number of tests
+t_test = t[:int(test_ln*f_sample)]  # normalized time for each test
+tach_tests = []
+tach_tests_raw = []
+pot_tests = []
+pot_tests_raw = []
+for i in range(num_tests):
+    idx_s = int(i*test_iv*f_sample) 
+    idx_e = int(((i*test_iv)+test_ln)*f_sample)
+    pot_tests.append(vel_c[idx_s:idx_e])
+    pot_tests_raw.append(vel_f[idx_s:idx_e])
+    tach_tests.append(tach_c[idx_s:idx_e])
+    tach_tests_raw.append(tach[idx_s:idx_e])
+    plt.plot(t_test+i*test_ln, pot_tests_raw[i], linewidth=0.5)
+    plt.plot(t_test+i*test_ln, pot_tests[i], marker='.',linewidth=0)
+plt.ylabel('Velocity [mm/s]')
+plt.xlabel('Offset Time [s]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:vel_iso2
+#+CAPTION: Potentiometer Test Velocity Data
+[[file:vel_iso2.svg]]
+
+#+begin_src ipython :session :ipyfile tach_iso2.svg :exports code :results none
+for i in range(num_tests):
+    plt.plot(t_test+i*test_ln, tach_tests_raw[i], linewidth=0.5)
+    plt.plot(t_test+i*test_ln, tach_tests[i], marker='.',linewidth=0)
+plt.xlabel('Offset Time [s]')
+plt.ylabel('Tachometer Voltage [V]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:tach_iso2
+#+CAPTION: Tachometer Test Data
+[[file:tach_iso2.svg]]
+
+As seen in Figures [[fig:vel_iso2]] and [[fig:tach_iso2]], the total variance filter can't quite remove the slope at the beginning of each test, which will introduce error into our averages.
+
+We can mitigate this by only using the last 90% of each dataset to calculate the average.
+#+begin_src ipython :session :exports both :results raw drawer
+pot_vel_avg = []
+tach_avg = []
+for p_t, t_t in zip(pot_tests, tach_tests):
+    p_t = p_t[p_t > thresh]
+    p_t = p_t[-round(0.9*len(p_t)):]
+    t_t = t_t[t_t > tach_thresh]
+    t_t = t_t[-round(0.9*len(t_t)):]
+    pot_vel_avg.append(p_t.mean())
+    tach_avg.append(t_t.mean())
+pot_vel_avg = np.array(pot_vel_avg)
+tach_avg = np.array(tach_avg)
+df_avg = pd.DataFrame({'pot_vel_avg': pot_vel_avg, 'tach_avg': tach_avg})
+df_avg
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[728]:
+|    |   pot_vel_avg |   tach_avg |
+|----+---------------+------------|
+|  0 |       115.476 |   0.253661 |
+|  1 |       132.272 |   0.290233 |
+|  2 |       148.707 |   0.325776 |
+|  3 |       166.164 |   0.363817 |
+|  4 |       182.518 |   0.399057 |
+|  5 |       200.047 |   0.436898 |
+|  6 |       217.61  |   0.475157 |
+|  7 |       235.322 |   0.513512 |
+|  8 |       252.67  |   0.551122 |
+|  9 |       271.717 |   0.592203 |
+:end:
+
+We can double check our averages against our plot:
+#+begin_src ipython :session :ipyfile vel_iso3.svg :exports code :results none
+for i in range(num_tests):
+    plt.plot(t_test+i*test_ln, pot_tests_raw[i], linewidth=0.5)
+    plt.plot(t_test+i*test_ln, pot_tests[i], marker='.',linewidth=0)
+    plt.hlines(pot_vel_avg[i], i*test_ln, i*test_ln + 1, color='k', zorder=10)
+plt.ylabel('Velocity [mm/s]')
+plt.xlabel('Offset Time [s]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:vel_iso3
+#+CAPTION: Potentiometer Test Velocity Data with Averages
+[[file:vel_iso3.svg]]
+#+begin_src ipython :session :ipyfile tach_iso3.svg :exports code :results none
+for i in range(num_tests):
+    plt.plot(t_test+i*test_ln, tach_tests_raw[i], linewidth=0.5)
+    plt.plot(t_test+i*test_ln, tach_tests[i], marker='.',linewidth=0)
+    plt.hlines(tach_avg[i], i*test_ln, i*test_ln + 1, color='k', zorder=10)
+plt.ylabel('Tachometer Voltage [V]')
+plt.xlabel('Offset Time [s]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:tach_iso3
+#+CAPTION: Tachometer Test Data with Averages
+[[file:tach_iso3.svg]]
+
+From Figures [[fig:vel_iso3]] and [[fig:tach_iso3]] we can see that our averages match the raw data pretty well.
+Plotting the tachometer voltage as a function of linear velocity:
+#+begin_src ipython :session :ipyfile tach_fit1.svg :exports code :results none
+plt.plot(vel, tach, marker='.',linewidth=0, label='Raw Data')
+plt.scatter(pot_vel_avg, tach_avg, color='r',zorder=10, label='Averaged Data')
+plt.ylim((0.2, 0.7))
+plt.xlim((100, 300))
+plt.xlabel('Velocity [mm/s]')
+plt.ylabel('Tachometer Voltage [V]')
+plt.legend()
+#+end_src
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:tach_fit1
+#+CAPTION: Tachometer Voltage vs. Velocity
+[[file:tach_fit1.svg]]
+
+As I've said before, looking at Figure [[fig:tach_fit1]] we can see that going through this complicated process to filter and average the data to generate a fit is largely unnecessary.
+Fitting the raw data directly should give essentially the same calibration curve, perhaps an even better one since the averaging process threw away lots of data for low and negative velocities.
+If there is concern for significant nonlinearity over the range of colllected data, it should be sufficient to just limit the fit to the range we're interested in.
+*** Tachometer Calibration Curve
+Fitting against our averaged data:
+#+begin_src ipython :session :ipyfile tach_fit2.svg :exports code :results none
+V_tach = P.fit(pot_vel_avg, tach_avg, 1)
+V_tach2 = P.fit(vel, tach, 1)
+b_vt, a_vt = V_tach.convert().coef
+f_name = f'$V_{{tach}}(v) = ${a_vt:.3e}$\cdot v + ${b_vt:.3e}'
+plt.plot(pot_vel_avg, V_tach(pot_vel_avg),
+         label='Averaged Fit')
+plt.plot(pot_vel_avg, V_tach2(pot_vel_avg), 'r--',
+         label='Raw Fit')
+plt.scatter(pot_vel_avg, tach_avg,
+            label='Averaged Data')
+plt.text(min(pot_vel_avg), 0.95*max(tach_avg), f_name)
+plt.legend(loc='lower right')
+plt.xlabel('Velocity [mm/s]')
+plt.ylabel('Tachometer Voltage [V]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:tach_fit2
+#+CAPTION: Tachometer Calibration Curve
+[[file:tach_fit2.svg]]
+
+Comparing against the datasheet:
+#+begin_src ipython :session :exports both :results raw drawer
+v_tach = 7/1000  # V/rpm, from datasheet
+v_tach = v_tach*60  # V/rps
+v_tach = v_tach/teeth/pitch  # V/(mm/s)
+v_tach, a_vt
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[758]:
+: (0.0021, 0.0021667306118882484)
+:end:
+* Transient Sensor Response
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+*** Comparing Tachometer Data Against integrated Accelerometer Data
+:PROPERTIES:
+ :ALT_TITLE: Velocity from Accelerometer Data
+:END:
+First let's load in the provided data:
+#+begin_src ipython :session :exports both :results raw drawer
+df = pd.read_csv('data/lab3_C.csv')
+# Some values are NaN, replace with 0
+df = df.fillna(0)
+t = np.array(df['Time (s)'])
+pos = np.array(x_pot(df['Potentiometer (V)']))
+tach = np.array(df['Tachometer (V)'])
+accel = np.array(df['Accelerometer (V)'])
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1063]:
+:end:
+
+We can get the velocity by refitting our data with the correct axes:
+#+begin_src ipython :session :exports both :results raw drawer
+vel_tach = P.fit(tach_avg, pot_vel_avg, 1)
+vel = vel_tach(tach)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1064]:
+:end:
+
+Assuming the carriage starts and stops at rest and from the same location, the average acceleration during the entire test sequence should be zero.
+This means that we can simply take the average of the entire dataset to get the offset.
+#+begin_src ipython :session :exports both :results raw drawer
+accel_ofst = np.mean(accel)  # V
+accel_ofst
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1065]:
+: 2.6813744500000003
+:end:
+
+The datasheet for the ADXL203 lists a typical sensitivity of about $\SI{1}{\volt\per g}$ (1 volt per gravitational acceleration), which we can use to find the actual measured acceleration value.
+#+begin_src ipython :session :exports both :results raw drawer
+g = 9.81 * 1000  # mm/s^2
+accel_sens = 1  # V/g
+accel_sens = accel_sens/g  # V/(mm/s^2)
+
+accel_r = (accel - accel_ofst)/accel_sens # mm/s^2
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1066]:
+:end:
+
+Integrating the accelerometer data and plotting it against the tachometer data:
+#+begin_src ipython :session :ipyfile accel_int1.svg :exports code :results none
+vel_accel_r = cumtrapz(accel_r, t, initial=0)
+plt.plot(t, vel_accel_r, label='Accelerometer')
+plt.plot(t, vel, label='Tachometer')
+plt.xlabel('Time [s]')
+plt.ylabel('Velocity [mm/s]')
+plt.legend()
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:accel_int1
+#+CAPTION: Velocity vs. Time from Accelerometer and Tachometer
+[[file:accel_int1.svg]]
+The integrated accelerometer data matches fairly closely with the tachometer data, however there is some noticeable error.
+*** Comparing Potentiometer Data Against integrated Tachometer and Accelerometer Data
+:PROPERTIES:
+ :ALT_TITLE: Poistion from Tachometer and Accelerometer Data
+:END:
+Integrating the accelerometer and tachometer data and plotting against the potentiometer data:
+#+begin_src ipython :session :ipyfile accel_int2.svg :exports code :results none
+pos_accel_r = cumtrapz(vel_accel_r, t, initial=0)
+pos_tach = cumtrapz(vel, t, initial=0)
+plt.plot(t, pos_accel_r, label='Accelerometer')
+plt.plot(t, pos_tach, label='Tachometer')
+plt.plot(t, pos, label='Potentiometer')
+plt.xlabel('Time [s]')
+plt.ylabel('Position [mm]')
+plt.legend()
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:accel_int2
+#+CAPTION: Position vs. Time from Accelerometer, Tachometer, and Potentiometer
+[[file:accel_int2.svg]]
+
+From Figure [[fig:accel_int2]], we can see that there is significant drift in the integrated data from the sensors compared to the potentiometer.
+Because our data is discontinuous, we can only do numerical integration, which will eventually cause drift even if there is zero error in the signal.
+On top of that, any offset error in the original data can quickly accumulate during integration.
+For example, if our sensor data has a constant offset of $1$, there will be an extra $t$ term added to the integrated data, and a second integration would add a $t^2$ term.
+Furthermore, random noise can also cause errors in the integrated data.
+Error from noise and numerical integration can be reduced with a faster sample time, since noise spikes will occupy less time, and less data will be thrown away.
+Of course, faster sample times may be costly or challenging to implement on a real system.
+* Additional Exercises
+** Derive an equation that relates the linear displacement $x$ of the lateral positioner to the count $n$ of the angular encoder.
+:PROPERTIES:
+ :ALT_TITLE: Question 1
+:END:
+From the lab manual, we are given:
+\begin{align*}
+C &= \SI{1440}{counts \per rev} &&: \text{Counts per revolution of encoder} &\\
+p &= \SI{10}{\milli\meter\per tooth} &&: \text{Tooth pitch of belt pulley} &\\
+n_t &= \SI{20}{teeth \per rev} &&: \text{Number of teeth on belt pulley}
+\end{align*}
+
+From this we can derive the linear displacement $x$ in $\si{\milli\meter}$ as:
+\begin{equation}
+x(n) = n\frac{p n_t}{C}
+\end{equation}
+** Acquire (on line) the data sheet of the accelerometer. Use it to answer the following questions:
+:PROPERTIES:
+ :ALT_TITLE: Question 2
+:END:
+The accelerometer datasheet can be found at https://www.analog.com/media/en/technical-documentation/data-sheets/adxl103_203.pdf.
+*** What is the output voltage range of the accelerometer?
+:PROPERTIES:
+ :ALT_TITLE: Question 2.1
+:END:
+The ADXL203 accelerometer has a full scale measurement range of $\pm\SI{1.7}{g}$, with an typical sensitivity of $\SI{1000}{\milli\volt\per g}$, which means it has a typical output voltage range of $\pm\SI{1700}{\milli\volt}$
+*** What is the resonant frequency of the accelerometer?
+:PROPERTIES:
+ :ALT_TITLE: Question 2.2
+:END:
+The ADXL203 accelerometer has a typical resonant frequency of $\SI{5.5}{\kilo\hertz}$
+*** Using output capacitors, what range of bandwidths (DC to $f_\text{max}$) can you achieve?
+:PROPERTIES:
+ :ALT_TITLE: Question 2.3
+:END:
+The bandwidth of the ADXL203 accelerometer is given as:
+
+#+NAME: eq:bw_range
+\begin{equation}
+f_{-3dB} = \frac{1}{2\pi(\SI{32}{\kilo\ohm} \pm \SI{25}{\percent})C_{(X,Y)}}
+\end{equation}
+Where $C_{(X,Y)}$ has a minimum value of $\SI{2000}{\pico\farad}$.
+Using the typical value for the internal resistor, this gives a maximum bandwidth of $\SI{2486.8}{\hertz}$
+*** What is the relationship between $f_\text{max}$ and the corresponding capacitor $C$?
+:PROPERTIES:
+ :ALT_TITLE: Question 2.4
+:END:
+The relationship between $f_\text{max}$ and $C$ is given in Equation [[eq:bw_range]]
+** Search and obtain the data sheets and images of the following items: 1. A linear DC actuator; 2. Drive hardware for the actuator; 3. An LVDT; 4. A microcontroller. Suppose that the LVDT is connected to the actuator, and the microcontroller is programmed to acquire the signals from the LVDT, and based on that information and the required motion profile, a signal is generated and provided to drive the actuator. Give a schematic diagram that contains the images of these three components and any other required hardware for this system. In the diagram, show how the components are interconnected, using lines to represent cable strands (signal paths).
+:PROPERTIES:
+ :ALT_TITLE: Question 3
+:END:
+*** Linear Motor
+I will be using the SDLM-051-095-01-01 sold by Moticont[fn:motorlink].
+The datasheet can be found at http://moticont.com/pdf/SDLM-051-095-01-01.pdf
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: SDLM-051-095-01-01 linear motor.
+[[file:motor.jpg]]
+
+[fn:motorlink]http://moticont.com/SDLM-051-095-01-01.htm
+
+*** PWM Amplifier
+I will be using the DRV8871 DC motor driver IC, breakout sold by Adafruit[fn:drvlink].
+The datasheet can be found at https://cdn-shop.adafruit.com/product-files/3190/drv8871.pdf
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: Adafruit DRV8871 breakout board
+[[file:drv.jpg]]
+
+[fn:drvlink] https://www.adafruit.com/product/3190
+
+*** LVDT
+I will be using an HR 500 sold by TE Connectivity[fn:lvdtlink].
+The datasheet can be found at https://www.te.com/commerce/DocumentDelivery/DDEController?Action=showdoc&DocId=Data+Sheet%7FHR%7FA%7Fpdf%7FEnglish%7FENG_DS_HR_A.pdf
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: HR 500 LVDT
+[[file:lvdt.png]]
+
+[fn:lvdtlink]https://www.te.com/global-en/product-02560394-000.html
+
+*** Microcontroller
+I will be using an Arduino Uno R3 (ATmega328P), sold by Adafruit[fn:mculink].
+The datasheet for the MCU itself can be found at https://cdn-shop.adafruit.com/product-files/4806/4806_Atmel-7810-Automotive-Microcontrollers-ATmega328P_Datasheet.pdf
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: Arduino Uno R3
+[[file:arduino.jpg]]
+
+[fn:mculink] https://www.adafruit.com/product/4806
+
+*** LVDT Signal Conditioner
+The lab manual implies that the LVDT should be directly connected to the microcontroller.
+This makes little sense unless either the microcontroller or the LVDT assembly contains circuitry to drive and condition the LVDT signal, which is not the case for the components chosen[fn:lablvdt].
+I will be using an LVM-110, sold by TE Connectivity[fn:lvdtcondlink].
+The datasheet can be found at https://www.te.com/commerce/DocumentDelivery/DDEController?Action=srchrtrv&DocNm=LVM-110&DocType=Data+Sheet&DocLang=English
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: LVM-110 LVDT Signal Conditioning Board
+[[file:lvdtcond.png]]
+
+[fn:lvdtcondlink] https://www.te.com/global-en/product-CAT-PSI0006.html
+
+
+[fn:lablvdt]The Sentech 75S2DC-5000R LVDT used in the lab setup seems to already have signal conditioning circuitry built in.
+
+*** Schematic
+#+CAPTION: Wiring schematic for motor controller system
+[[file:motor_driver_circuit_fixed.svg]]
+
+
+
