@@ -1,0 +1,415 @@
+#+TITLE: MECH 420 Lab 4
+#+AUTHOR: Jasper Chan - 37467164 @@latex:\\@@ jasperchan515@gmail.com
+
+#+OPTIONS: title:nil toc:nil
+
+#+LATEX_HEADER: \definecolor{bg}{rgb}{0.95,0.95,0.95}
+#+LATEX_HEADER: \setminted{frame=single,bgcolor=bg,samepage=true}
+#+LATEX_HEADER: \setlength{\parindent}{0pt}
+#+LATEX_HEADER: \usepackage{float}
+#+LATEX_HEADER: \usepackage{svg}
+#+LATEX_HEADER: \usepackage{cancel}
+#+LATEX_HEADER: \usepackage{amssymb}
+#+LATEX_HEADER: \usepackage{mathtools, nccmath}
+#+LATEX_HEADER: \DeclareSIUnit\inch{in}
+#+LATEX_HEADER: \sisetup{per-mode=fraction}
+#+LATEX_HEADER: \newcommand{\Lwrap}[1]{\left\{#1\right\}}
+#+LATEX_HEADER: \newcommand{\Lagr}[1]{\mathcal{L}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Lagri}[1]{\mathcal{L}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztrans}[1]{\mathcal{Z}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztransi}[1]{\mathcal{Z}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\ZOH}[1]{\text{ZOH}\left(#1\right)}
+#+LATEX_HEADER: \newcommand{\approptoinn}[2]{\mathrel{\vcenter{\offinterlineskip\halign{\hfil$##$\cr#1\propto\cr\noalign{\kern2pt}#1\sim\cr\noalign{\kern-2pt}}}}}
+#+LATEX_HEADER: \newcommand{\appropto}{\mathpalette\approptoinn\relax}
+
+#+BEGIN_EXPORT latex
+\makeatletter
+\begin{titlepage}
+\begin{center}
+\vspace*{2in}
+{\Large \@title \par}
+\vspace{1in}
+{\Large \@author \par}
+\vspace{3in}
+{\large \@date}
+\end{center}
+\end{titlepage}
+\makeatother
+#+END_EXPORT
+
+
+\tableofcontents
+
+#+begin_src ipython :session :results raw drawer :exports none
+import numpy as np
+import scipy.optimize
+import scipy.fftpack
+from scipy.integrate import cumtrapz
+from scipy import signal
+from numpy.polynomial.polynomial import Polynomial as P
+import pandas as pd
+import matplotlib
+from matplotlib import pyplot as plt
+import prox_tv as ptv
+from IPython.display import set_matplotlib_formats
+%matplotlib inline
+set_matplotlib_formats('svg')
+matplotlib.rcParams.update({
+    'errorbar.capsize': 2})
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[1]:
+:end:
+
+#+begin_src ipython :session :results raw drawer :exports none
+import IPython
+from tabulate import tabulate
+
+class OrgFormatter(IPython.core.formatters.BaseFormatter):
+    def __call__(self, obj):
+        if(isinstance(obj, str)):
+            return None
+        if(isinstance(obj, pd.core.indexes.base.Index)):
+            return None
+        try:
+            return tabulate(obj, headers='keys',
+                            tablefmt='orgtbl', showindex='always')
+        except:
+            return None
+
+ip = get_ipython()
+ip.display_formatter.formatters['text/org'] = OrgFormatter()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[116]:
+:end:
+
+
+
+Note: when not specified, all units are SI without prefixes.
+* Transducer Static Transfer Characteristic
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+*** Voice Coil Spring Constant Calibration
+First let's load in the provided data:
+#+begin_src ipython :session :exports both :results raw drawer
+df_0w = pd.read_csv('data/A_Zero_weight.csv')
+df_2w = pd.read_csv('data/A_Two_weights.csv')
+df_4w = pd.read_csv('data/A_Four_weghts.csv')
+#+end_src
+
+Taking the average of the measurements for each dataset:
+#+begin_src ipython :session :exports both :results raw drawer
+M = 0.200 # kg, proof weight
+g = 9.81  # m/s^2
+F_g0 = M*g  # N, proof force
+F_g = F_g0*np.array([0, 2, 4])  #  forces used for calibration
+led_v = []
+for d in [df_0w, df_2w, df_4w]:
+    led_v.append(np.mean(d['LED Sensor (V)']))
+led_v = np.array(led_v)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[35]:
+:end:
+
+Converting the voltages to displacements using the values from Lab 1:
+#+begin_src ipython :session :exports both :results raw drawer
+def x_led_alu(v):
+    # Values from prelab
+    A = -0.561  # V/mm
+    B = 8.713  # V
+    # Return negative, there may be a sign/offset error
+    # but we're not super concerned about either of those
+    # for this application
+    return -(v - B)/A  # mm
+led_x = x_led_alu(led_v)  # mm
+led_x0 = led_x[0]  # mm, offset
+led_x = led_x - led_x0  # remove offset
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[112]:
+:end:
+
+We can now find the average stiffness $k$ of the transducer:
+#+begin_src ipython :session :exports both :results raw drawer
+k = np.mean(F_g[1:]/led_x[1:]) # avoid divide by zero
+k = 1000*k  # Convert to N/m
+k  # N/m
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[32]:
+: 5290.562325185884
+:end:
+* Transducer Dynamic Transfer Characteristic
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+*** Displacement as a Function of Current
+Referring to Equations \ref{eq:force_balance_comp} and \ref{eq:x_0}, we can rewrite the position $x$ as some displacement $\Delta x$ from the reference position $x_0$.
+\begin{equation}
+(M + m)\ddot{x} + b \dot{x} + k(\Delta x - x_0) = B I \ell - (M + m)g
+\end{equation}
+If we ignore damping ($b = 0$) and assume $M = 0$, this simplifies down to:
+\begin{equation}
+m\ddot{x} + k\Delta x = B I \ell
+\end{equation}
+Assuming harmonic excitations only such that $\ddot{x} = -\omega^2 \Delta x$:
+\begin{equation}
+-m\omega^2 \Delta x + k\Delta x = B I \ell
+\end{equation}
+Solving for $\Delta x$:
+\begin{equation}
+\Delta x = \frac{BI \ell}{k - m\omega^2} \label{eq:delta_x}
+\end{equation}
+*** Coil Impedance and Transducer Mass
+**** Impedance $Z$ \par
+The coil voltage is given from the lab manual as:
+\begin{equation}
+V = RI + j\omega LI + j\omega B\ell x
+\end{equation}
+Subbing in Equation \ref{eq:delta_x}:
+\begin{align}
+V &= RI + j\omega LI + j\omega B\ell \frac{B \ell}{k - m\omega^2} I \nonumber \\
+&= RI + j\omega LI + j\omega \frac{B^2 \ell^2}{k - m\omega^2} I \nonumber \\
+&= \left(R + j\omega L + j\omega \frac{B^2 \ell^2}{k - m\omega^2}\right)I
+\end{align}
+Solving for impedance:
+\begin{align}
+Z &= \frac{V}{I} \nonumber \\
+&= R + j\omega L + j\omega \frac{B^2 \ell^2}{k - m\omega^2}\\
+\end{align}
+Neglecting inductance ($L = 0$):
+\begin{equation}
+Z = R + j\omega \frac{B^2 \ell^2}{k - m\omega^2}\\
+\end{equation}
+
+**** Transducer Mass $m$ \par
+Solving for the mass of the transducer:
+\begin{align*}
+f_p &= \frac{1}{2 \pi}\sqrt{\frac{k}{m}} \\
+m &= \frac{k}{\left(2 \pi f_p \right)^2}
+\end{align*}
+Plugging in our values:
+#+begin_src ipython :session :exports both :results raw drawer
+f_p = 37  # Hz, from Canvas
+m = k/(2*np.pi*f_p)**2
+m  # kg
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[37]:
+: 0.09789007248381894
+:end:
+*** Verifying Change in Resonance
+If the mass of the system changes, we expect a change in the resonant frequency.
+Calculating the new resonance for with two proof masses on the transducer:
+#+begin_src ipython :session :exports both :results raw drawer
+f_pp = 1/(2*np.pi) * np.sqrt(k/(m + 2*M))
+f_pp  # Hz
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[47]:
+: 16.406060761277278
+:end:
+
+This value is supposed to be close to $\SI{22}{\hertz}$ according to Canvas, however it appears the TAs have made yet another mistake.
+The value provided seems to correlate much better with just a single proof mass[fn:ffs].
+#+begin_src ipython :session :exports both :results raw drawer
+f_pp = 1/(2*np.pi) * np.sqrt(k/(m + M))
+f_pp  # Hz
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[48]:
+: 21.210115528023216
+:end:
+
+[fn:ffs] Given the nature of this error it seems unlikely that the TAs actually went through the data collection and analysis process, rather it seems they calculated it from known values and managed to make an arithmetic error.
+* Motion Sensing with the Voice Coil Transducer
+** Experimental Procedure
+This was conducted by the lab TAs
+** Analysis
+*** Plotting Measured Quantities
+Let's load the provided data:
+#+begin_src ipython :session :exports both :results raw drawer
+df = pd.read_csv('data/C.csv')
+t = np.array(df['Time (s)'])
+led_v = np.array(df['LED Sensor (V)'])
+acc_v = np.array(df['Accelerometer (V)'])
+col_v = np.array(df['Voice Coil Voltage (V)'])
+col_i = np.array(df['Voice Coil Current (V)'])/0.2
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[146]:
+:end:
+
+The velocity $\dot{x}$ of the transducer is related to the back EMF $v_i$ by the equation:
+\begin{equation}
+v_i = B\ell \dot{x}
+\end{equation}
+However, because we are not given $B \ell$, we cannot use the data to find $\dot{x}$
+
+Converting our data to units of motion:
+#+begin_src ipython :session :exports both :results raw drawer
+accel_sens = 1  # V/g
+led_x = x_led_alu(led_v) - led_x0  # mm
+acc_x = (acc_v - np.mean(acc_v))/accel_sens # g, gravitational offset removed
+#+end_src
+
+Plotting the data:
+#+begin_src ipython :session :ipyfile voice_coil.svg :exports both :results none
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(4)
+fig.set_figheight(6)
+ax1.plot(t, led_x) 
+ax1.set(ylabel='LED Sensor\nPosition [mm]')
+ax2.plot(t, acc_x)
+ax2.set(ylabel='Accelerometer\nAcceleration [g]')
+ax3.plot(t, col_v)
+ax3.set(ylabel='Coil\nVoltage [V]')
+ax4.plot(t, col_i)
+ax4.set(ylabel='Coil\nCurrent [A]', xlabel='Time [s]')
+fig.tight_layout()
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:voice_coil
+#+CAPTION: Plot of Voice Coil Motion
+[[file:voice_coil.svg]]
+
+*** Discussion
+Looking at Figure [[fig:voice_coil]], it appears that the voice coil voltage correlates linearly with the position measured by the LED sensor.
+We can verify this by plotting them against each other:
+#+begin_src ipython :session :ipyfile vcv_vs_led.svg :exports both :results none
+plt.scatter(col_v, led_x)
+plt.xlabel('"Voice Coil Voltage [V]"')
+plt.ylabel('LED Sensor Position [mm]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:vcv_vs_led
+#+CAPTION: Plot of linear relationship between LED Sensor Position and "Voice Coil Voltage"
+[[file:vcv_vs_led.svg]]
+
+Presumably the column labelled ~Voice Coil Voltage (V)~ actually contains the data for the IR sensor.
+
+The voice coil current appears to linearly correlate with the velocity of the voice coil.
+We can verify this by plotting the integral of the measured current against the position:
+#+begin_src ipython :session :ipyfile vci_vs_led.svg :exports both :results none
+plt.scatter(cumtrapz(col_i - np.mean(col_i)), led_x[1:])
+plt.xlabel('Integrated Coil Current')
+plt.ylabel('LED Sensor Position [mm]')
+#+end_src
+
+#+ATTR_LATEX: :placement [H]
+#+NAME: fig:vci_vs_led
+#+CAPTION: Plot of linear relationship between LED Sensor Position and the integral of "Voice Coil Current"
+[[file:vci_vs_led.svg]]
+This indicates that the column labelled ~Voice Coil Current (V)~ was likely actually measuring the open circuit voltage of the voice coil.
+* Additional Exercises
+** Establish the vertical equation of motion for the experimental platform containing the Lorentz force, gravitational force, spring force, and the damping force. Provide expressions for each of these forces. Include the gravitational forces from both the mass $m$ of the experimental platform and the mass $M$ that will be added to it.
+:PROPERTIES:
+ :ALT_TITLE: Question 1
+:END:
+
+Let:
+\begin{align*}
+F_L &:= \text{Lorentz force}\\
+F_g &:= \text{Gravitational force}\\
+F_b &:= \text{Damping force}\\
+F_s &:= \text{Spring force}\\
+\end{align*}
+
+The force balance is then:
+\begin{align}
+\sum F = (M + m)\ddot{x} + F_L + F_g + F_b + F_s &= 0  \label{eq:force_balance_initial}\\
+(M + m)\ddot{x} - B I \ell + (M + m)g + b \dot{x} + kx \nonumber \\
+(M + m)\ddot{x} + b \dot{x} + kx &= B I \ell - (M + m)g \label{eq:force_balance_comp}
+\end{align}
+
+** What is the "downward" displacement $x_0$ of the platform for zero current ($I = 0$) under static conditions and without the additional weight ($M = 0$)? This corresponds to the static equilibrium condition.
+:PROPERTIES:
+ :ALT_TITLE: Question 2
+:END:
+For static conditions, $\dot{x} = \ddot{x} = 0$.
+Equation \ref{eq:force_balance_comp} then reduces to:
+\begin{equation}
+x_0 = -\frac{mg}{k} \label{eq:x_0}
+\end{equation}
+** Search and obtain the data sheets and images of the following items: 1. A voice coil with drive hardware; 2. A piezoelectric accelerometer; 3. A microcontroller. Suppose that the accelerometer is mounted to the voice coil, and the microcontroller is programmed to acquire the signal from the accelerometer, and based on that information and the required motion profile, a signal is generated and provided to drive the voice coil. Give a schematic diagram that contains the images of these components and any other required hardware for this system. In the diagram, show how the components are interconnected, using lines to represent cable strands (signal paths).
+:PROPERTIES:
+ :ALT_TITLE: Question 3
+:END:
+*** Voice Coil
+I will be using this $\SI{8}{\ohm}$, $\SI{1}{\watt}$ speaker sold by Adafruit[fn:speakerlink].
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: $\SI{3}{\inch}$ $\SI{8}{\ohm}$ $\SI{1}{\watt}$ speaker.
+[[file:speaker.jpg]]
+
+[fn:speakerlink] https://www.adafruit.com/product/1313
+*** Drive Hardware
+I will be using this MAX98357 breakout board sold by Adafruit[fn:amplink].
+This amplifier takes an I2S input which would give more fine control over the input signal versus a simple PWM input.
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: MAX98357 I2S Class D Amplifier breakout board
+[[file:amp.jpg]]
+
+[fn:amplink] https://www.adafruit.com/product/1313
+*** Piezoelectric Accelerometer
+Specifically asking for a piezoelectric accelerometer is a somewhat odd choice given the prolific availability of MEMS accelerometers that already contain all of the necessary drive and signal conditioning hardware required to use it with a microcontroller.
+Piezoelectric accelerometers are also generally bulkier and heavier than their MEMS equivalents, which may impact the performance of the system[fn:hypocracy].
+Nevertheless, I will be using a 6222S-20A sold by Endevco[fn:accellink].
+The datasheet can be found at https://buy.endevco.com/ContentStore/MktgContent/Endevco/Datasheet/6222S_DS_091719.pdf
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: 6222S-20A Piezoelectric Accelerometer
+[[file:accel.jpg]]
+
+[fn:accellink] https://buy.endevco.com/accelerometer/6222s-accelerometer-2
+[fn:hypocracy] The ADXL203 accelerometer used in this lab is a MEMS sensor, probably due to the reasons above.
+*** Microcontroller
+I will be using a WEMOS/LOLIN D1 mini (ESP8266), sold by LOLIN[fn:mculink], specifically because it can be configured to output I2S data.
+The datasheet for the MCU itself can be found at https://www.espressif.com/sites/default/files/documentation/esp8266-technical_reference_en.pdf
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: LOLIN D1 mini microcontroller
+[[file:wemos.jpg]]
+
+[fn:mculink] https://www.aliexpress.com/item/32529101036.html?spm=a2g0o.store_home.productList_2559240.subject_2
+*** Piezoelectric Accelerometer Signal Conditioner
+The lab manual implies that the accelerometer should be directly connected to the microcontroller.
+This makes little sense unless either the microcontroller or the accelerometer assembly contains circuitry to drive and condition the accelerometer signal, which is not the case for the components chosen.
+I will be using an 2777A-02-10, sold by Endevco[fn:accelcondlink].
+The datasheet can be found at https://buy.endevco.com/ContentStore/mktg/Downloads/2777A_DS_082119.pdf
+
+#+ATTR_LATEX: :placement [H] :width 0.7\textwidth
+#+CAPTION: 2777A-02-10 Differential remote charge converter
+[[file:accelcond.jpg]]
+
+[fn:accelcondlink] https://buy.endevco.com/Products?m=2777A-02-10
+
+*** Schematic
+#+ATTR_LATEX: :placement [H]
+#+CAPTION: Wiring schematic for voice coil controller system
+[[file:motor_driver_circuit_fixed.svg]]
+
+
+
