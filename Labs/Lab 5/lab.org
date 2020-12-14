@@ -1,0 +1,496 @@
+#+TITLE: MECH 420 Lab 5
+#+AUTHOR: Jasper Chan - 37467164 @@latex:\\@@ jasperchan515@gmail.com
+
+#+OPTIONS: title:nil toc:nil
+
+#+LATEX_HEADER: \definecolor{bg}{rgb}{0.95,0.95,0.95}
+#+LATEX_HEADER: \setminted{frame=single,bgcolor=bg,samepage=true}
+#+LATEX_HEADER: \setlength{\parindent}{0pt}
+#+LATEX_HEADER: \usepackage[explicit]{titlesec}
+#+LATEX_HEADER: \usepackage{environ}
+#+LATEX_HEADER: \usepackage{float}
+#+LATEX_HEADER: \usepackage{svg}
+#+LATEX_HEADER: \usepackage{cancel}
+#+LATEX_HEADER: \usepackage{amssymb}
+#+LATEX_HEADER: \usepackage{mathtools, nccmath}
+#+LATEX_HEADER: \usepackage{rotating}
+#+LATEX_HEADER: \usepackage[seed=-1]{lcg}
+#+LATEX_HEADER: \DeclareSIUnit\inch{in}
+#+LATEX_HEADER: \sisetup{per-mode=fraction}
+#+LATEX_HEADER: \newcommand{\Lwrap}[1]{\left\{#1\right\}}
+#+LATEX_HEADER: \newcommand{\Lagr}[1]{\mathcal{L}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Lagri}[1]{\mathcal{L}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztrans}[1]{\mathcal{Z}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\Ztransi}[1]{\mathcal{Z}^{-1}\Lwrap{#1}}
+#+LATEX_HEADER: \newcommand{\ZOH}[1]{\text{ZOH}\left(#1\right)}
+#+LATEX_HEADER: \newcommand{\approptoinn}[2]{\mathrel{\vcenter{\offinterlineskip\halign{\hfil$##$\cr#1\propto\cr\noalign{\kern2pt}#1\sim\cr\noalign{\kern-2pt}}}}}
+#+LATEX_HEADER: \newcommand{\appropto}{\mathpalette\approptoinn\relax}
+#+LATEX_HEADER: \titleformat{\section}{\bfseries\Large}{\chgrand[first=1,last=99,counter=section]\rand\cthulhu{\thesection}\ }{0pt}{\cthulhu{#1}}
+#+LATEX_HEADER: \titleformat{\subsection}{\bfseries\large}{\chgrand[first=1,last=99,counter=subsection]\rand\cthulhu{\thesubsection}\ }{0pt}{\cthulhu{#1}}
+#+LATEX_HEADER: \titleformat{\subsubsection}{\bfseries}{\chgrand[first=1,last=99,counter=subsubsection]\rand\cthulhu{\thesubsubsection}\ }{0pt}{\cthulhu{#1}}
+#+LATEX_HEADER: \makeatletter\newcommand{\globalrand}{\chgrand[first=-6,last=6,counter=rand]\rand\@whilenum\value{rand}=0\do{\rand}\global\cr@nd\cr@nd}\makeatother
+#+LATEX_HEADER: \makeatletter\long\def\turnbox#1#2{\Grot@setangle{#1}\setbox\z@\hbox{{#2}}\Grot@x\z@\Grot@y\z@\wd0\z@\dp0\z@\ht0\z@\Grot@box}\makeatother
+#+LATEX_HEADER: \makeatletter\long\def\makeph@nt#1{\setbox\z@\hbox{#1}\finph@nt}\makeatother
+#+LATEX_HEADER: \newcommand{\randomrotation}[1]{\globalrand\turnbox{\value{rand}}{#1}\phantom{#1}}
+#+LATEX_HEADER: \makeatletter\long\def\cthulhu#1{\@cthulhu#1 \@empty}
+#+LATEX_HEADER: \long\def\@cthulhu#1 #2{\randomrotation{#1}\space\ifx #2\@empty\else\expandafter\@cthulhu\fi#2}\makeatother
+#+LATEX_HEADER: \NewEnviron{cth}{\cthulhu{\BODY}}
+
+#+BEGIN_EXPORT latex
+\makeatletter
+\begin{titlepage}
+\begin{center}
+\vspace*{2in}
+{\Large \cthulhu\@title} \par}
+\vspace{1in}
+{\Large \cthulhu{Jasper Chan - 37467164} \par}
+{\Large \cthulhu{jasperchan515@gmail.com} \par}
+\vspace{3in}
+{\large \cthulhu{\@date}}
+\end{center}
+\end{titlepage}
+\makeatother
+#+END_EXPORT
+
+#+begin_src ipython :session :results raw drawer :exports none
+import numpy as np
+import scipy.optimize
+import scipy.fftpack
+from scipy.integrate import cumtrapz
+from scipy import signal
+from numpy.polynomial.polynomial import Polynomial as P
+import pandas as pd
+import matplotlib
+from matplotlib import pyplot as plt
+import prox_tv as ptv
+from IPython.display import set_matplotlib_formats
+%matplotlib inline
+set_matplotlib_formats('svg')
+matplotlib.rcParams.update({
+    'errorbar.capsize': 2})
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[433]:
+:end:
+
+#+begin_src ipython :session :results raw drawer :exports none
+import IPython
+from tabulate import tabulate
+
+class OrgFormatter(IPython.core.formatters.BaseFormatter):
+    def __call__(self, obj):
+        if(isinstance(obj, str)):
+            return None
+        if(isinstance(obj, pd.core.indexes.base.Index)):
+            return None
+        try:
+            return tabulate(obj, headers='keys',
+                            tablefmt='orgtbl', showindex='always')
+        except:
+            return None
+
+ip = get_ipython()
+ip.display_formatter.formatters['text/org'] = OrgFormatter()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[2]:
+:end:
+
+
+
+\cthulhu{Note: when not specified, all units are SI without prefixes.}
+* Introduction
+\cthulhu{Due to COVID-19 this lab's going to be all wibbly wobbly I guess.}
+* Calibration of the Displacement Sensor
+** Experimental Procedure
+\cthulhu{This was conducted by the lab TAs}
+** Analysis
+<<sec:analb>>
+\cthulhu{The data was not provided, instead the TA's gave this relation:}
+\begin{cth}
+$x = N \cdot \SI{9.05}{\micro\meter} - \SI{100.9}{\milli\meter}$
+\end{cth}
+
+\cthulhu{Let's implement this:}
+#+begin_src ipython :session :results raw drawer :exports code
+def pos(N):
+    # I guess the TAs forgot that the sensor data is in volts,
+    # because N is definitely not in volts
+    return N*0.00905 - 100.9  # mm
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[138]:
+:end:
+
+* Characterization of the Servo-valve
+** Experimental Procedure
+\cthulhu{This was conducted by the lab TAs}
+** Analysis
+*** Flow Rate Plot
+\cthulhu{Let's load the data:}
+#+begin_src ipython :session :results raw drawer :exports both
+df = pd.read_csv('data/experiment_C.csv')
+pos_v = np.array(df['Position (V)'])
+flow_v = np.array(df['Flow (V)'])
+p1_v = np.array(df['Bottom Pressure (V)'])
+cmd_v = np.array(df['Valve Command (V)'])
+
+# Looks like the TAs managed to forget to log the sample time, so
+# we will have to construct our own time array.
+#
+# The lab manual and dialogue from the video suggests that
+# the data was sampled at 20 Hz, however counting the number of samples
+# taken during one stroke of the piston reveals that this is ridiculous.
+# Observation of the LabVIEW program running reveals that the sampling
+# rate is much closer to 1 Hz.
+# f_s = 20  # Hz, from lab manual
+f_s = 1  # Hz, from having eyes that work
+t = np.arange(len(pos_v))*(1/f_s)  # s
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[594]:
+:end:
+
+\cthulhu{Observation of the data reveals that the provided calibration curve is completely useless.}
+\cthulhu{It appears that the provided curves takes values in encoder counts, while the provided data is in volts.}
+\cthulhu{I will instead assume that the output of the sensor is linear from 0V to 10V and the piston has a travel from -100.9mm to 0mm}
+#+begin_src ipython :session :results raw drawer :exports code
+def pos(v):
+    pos_max = 10.09  # cm
+    out_max = 10  # V
+    return v/out_max*pos_max - pos_max  # cm
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[595]:
+:end:
+
+\cthulhu{The ram position can then be calculated by:}
+#+begin_src ipython :session :results raw drawer :exports both
+pos_x = pos(pos_v)  # cm
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[596]:
+:end:
+
+\cthulhu{We can calculate the ram velocity by differentiating the position:}
+#+begin_src ipython :session :results raw drawer :exports both
+# Sample rate is 1Hz, delta t is 1s, so no need to differentiate time
+vel_x = np.append(np.diff(pos_x),0)  # cm/s
+plt.plot(t, vel_x)
+plt.xlabel('Time [s]')
+plt.ylabel('Velocity [cm/s]')
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[598]:
+: Text(0, 0.5, 'Velocity [cm/s]')
+[[file:./obipy-resources/PCepOV.svg]]
+:end:
+
+\cthulhu{We can use this piston velocity information to calculate the flow velocity going into the piston.}
+#+begin_src ipython :session :results raw drawer :exports both
+D_1 = 4.0 * 2.54  # cm, from lab manual
+D_2 = 2.5 * 2.54  # cm, from lab manual
+D_s = 0.5 * 2.54  # cm, from lab manual
+A_1 = np.pi/4*(D_1**2 - D_s**2)  # cm^2
+A_2 = np.pi/4*(D_1**2 - D_2**2)  # cm^2
+
+def flow_q1(vel):
+    return vel*A_1  # mL/s
+
+def flow_q2(vel):
+    return -vel*A_2  # mL/s
+
+def _flow_qs(vel):
+    if vel >= 0:
+        return flow_q1(vel)  # mL/s
+    return flow_q2(vel)  # mL/s
+
+flow_qs = np.vectorize(_flow_qs)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[599]:
+:end:
+
+\cthulhu{The lab manual provides a conversion from the flow sensor output to the measured flow, however it yet again appears to be wrong.}
+\cthulhu{The real max output voltage of the sensor appears to be about 20V for the measurement to match up with the flow calculated at the piston inlets on average, and about 25V for the measurements to match up with the calculated flow at the beginning of the stroke (}
+\begin{cth}
+x = -100.9\text{mm}
+\end{cth}
+\cthulhu{).}
+\cthulhu{There does not appear to be a value that makes the measurements match up at the end of the stroke.}
+\cthulhu{Because of this and since the calculated velocity is clearly not constant during each move, I assume there's some kind of nonlinearity in the position sensor that causes the value to be less correct as the piston extends, which means it is probably more correct to use the 25V scaling.}
+#+begin_src ipython :session :results raw drawer :exports both
+def flow(v):
+    flow_max = 16*3675.4118/60  # mL/s, from lab manual
+    out_max = 25  # V, from observation
+    return v/out_max*flow_max  # mL/s
+flow_q = flow(flow_v)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[600]:
+:end:
+
+\cthulhu{Plotting the flow sensor data against the flow through each piston inlet:}
+#+begin_src ipython :session :results raw drawer :exports both
+plt.plot(t, flow_q, label='$Q_s$')
+plt.plot(t, flow_q1(vel_x), label='$Q_1$')
+plt.plot(t, flow_q2(vel_x), label='$Q_2$')
+plt.xlabel('Time [s]')
+plt.ylabel('Flow Rate [mL/s]')
+plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[602]:
+: <matplotlib.legend.Legend at 0x7f9ad5448f70>
+[[file:./obipy-resources/HlYZCL.svg]]
+:end:
+
+\cthulhu{Of course, the data is much easier to interpret if you just plot the flow at $Q_s$ from the sensor and as calculated from $Q_1$ and $Q_2$}
+#+begin_src ipython :session :results raw drawer :exports both
+plt.plot(t, flow_q, label='$Q_s$ (from flow sensor)')
+plt.plot(t, flow_qs(vel_x), label='$Q_s$ (from piston measurements)')
+plt.legend()
+plt.xlabel('Time [s]')
+plt.ylabel('Flow Rate [mL/s]')
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[604]:
+: Text(0, 0.5, 'Flow Rate [mL/s]')
+[[file:./obipy-resources/4YAaRL.svg]]
+:end:
+*** System Behavior
+\cthulhu{When $Q_s=Q_1$, the piston is moving upwards, when $Q_s=-Q_2$, the piston is moving downwards.}
+*** Pressure Across Valve
+\cthulhu{Chamber 1 is flowing out to the reservoir when the control signal is positive, let's isolate those values:}
+#+begin_src ipython :session :results raw drawer :exports both
+def pres(v):
+    s = 2500*6894.7573/10  # Pa/V, from lab manual
+    return v*s  # Pa
+p_1 = pres(p1_v)  # Pa
+start_idxs = np.where(np.diff(cmd_v) != 0)[0] + 1
+end_idxs = start_idxs + np.append(np.diff(start_idxs), len(cmd_v) - 1)
+idxs = np.vstack((start_idxs, end_idxs)).T
+q_1 = flow_q1(vel_x)  # mL/s
+q_1s = []
+p_1s = []
+cmd_vs = []
+for i_s, i_e in idxs:
+    if cmd_v[i_s] < 0:
+        continue
+    cmd_vs.append(cmd_v[i_s])
+    # Assuming the piston's position sensor has the least
+    # nonlinearity error at the beginning of its stroke,
+    # it makes the most sense to just take the value closest
+    # to that point instead of the average of the stroke
+    q_1s.append(np.max(q_1[q_1 != 0][i_s:i_e]))
+    p_1s.append(np.mean(p_1[i_s:i_e]))
+q_1s = np.array(q_1s)  # mL/s
+p_1s = np.array(p_1s)  # Pa
+cmd_vs = np.array(cmd_vs)  # V
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[424]:
+:end:
+\cthulhu{Let's fit our data:}
+#+begin_src ipython :session :results raw drawer :exports both
+def q_1_over_p_1(cmd_v, K_i, V_V0):
+    return K_i*(cmd_v - V_V0)  # mL/s/Pa^0.5
+popt, pcov = scipy.optimize.curve_fit(q_1_over_p_1, cmd_vs, q_1s/np.sqrt(p_1s))
+K_i = popt[0]  # mL/s/V/Pa^0.5
+V_V0 = popt[1]  # V
+plt.scatter(cmd_vs, q_1s/np.sqrt(p_1s), label='$Q_1/\sqrt{p_1}$ (Raw Data)')
+plt.plot(cmd_vs, q_1_over_p_1(cmd_vs, K_i, V_V0),
+         label=(f'$Q_1/\sqrt{{p_1}}$ '
+                f'($K_i={K_i:.4f}$mL/s/V/Pa$^{{0.5}}$, '
+                f'$V_{{V0}}={V_V0:.4f}$V)'))
+plt.legend()
+plt.ylabel('$Q_1/\sqrt{p_1}$ [mL/s/Pa$^{0.5}$]')
+plt.xlabel('Command Voltage [V]')
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[620]:
+: Text(0.5, 0, 'Command Voltage [V]')
+[[file:./obipy-resources/jWIjF2.svg]]
+:end:
+* Load-dependent System Performance
+** Experimental Procedure
+\cthulhu{This was conducted by the lab TAs}
+** Analysis
+\cthulhu{Let's load the data:}
+#+begin_src ipython :session :results raw drawer :exports both
+df = pd.read_csv('data/experiment_D.csv')
+pos_v = np.array(df['Position (V)'])
+p1_v = np.array(df['Bottom Pressure (V)'])
+p2_v = np.array(df['Top Pressure (V)'])
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[621]:
+:end:
+
+\cthulhu{We can calculate the force in each chamber by:}
+#+begin_src ipython :session :results raw drawer :exports both
+p_1 = pres(p1_v)  # Pa
+p_2 = pres(p2_v)  # Pa
+F_1 = p_1*A_1/10000  # N
+F_2 = p_2*A_2/10000  # N
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[622]:
+:end:
+
+\cthulhu{The spring force is then:}
+#+begin_src ipython :session :results raw drawer :exports both
+F_s = F_1 - F_2
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[623]:
+:end:
+
+\cthulhu{Fitting and plotting the spring force to find the stiffness $k$:}
+#+begin_src ipython :session :results raw drawer :exports both
+pos_x = pos(pos_v)  # cm
+ks = np.diff(F_s)/np.diff(pos_x)  # N/cm
+# Spring constant should always be positive
+pos_ks = ks[ks > 0]
+k = np.mean(pos_ks)  # N/cm
+plt.scatter(pos_x[:-1], np.diff(F_s)/np.diff(pos_x),
+            label="dF_s/dx (Raw Data)")
+plt.plot(pos_x, np.ones(len(pos_x))*k,
+         label=f"Best fit ($k = {k:.3f}$ N/cm)")
+plt.ylabel('Spring Constant [N/cm]')
+plt.xlabel('Position [cm]')
+plt.ylim((0, 1000))
+plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[624]:
+: <matplotlib.legend.Legend at 0x7f9ad2011eb0>
+[[file:./obipy-resources/CCrely.svg]]
+:end:
+
+* Dynamics of the Hydraulic System
+** Experimental Procedure
+\cthulhu{This was conducted by the lab TAs}
+** Analysis
+*** Plotting the Step Response
+\cthulhu{Let's load the data:}
+#+begin_src ipython :session :results raw drawer :exports both
+df = pd.read_csv('data/experiment_E.csv')
+# The TAs randomly decided to say this column is measured in counts,
+# it's definitely not measured in counts
+pos_v = np.array(df['Position (Counts)'])
+cmd_v = np.array(df['Valve Command  (V)'])
+flow_v = np.array(df['Flow (V)'])
+
+# Again the TAs managed to forget to log the sample time, so
+# we will have to construct our own time array.
+#
+# The lab manual and video mentions that the data should be
+# sampled at 250Hz, however the video clearly shows the sample
+# rate is again roughly 1Hz.
+# How the TAs managed to not notice that 10 seconds of data collection
+# only produced 10 lines of data is beyond me.
+# 
+# Of course, since we're trying to characterize a step response this
+# data is completely worthless, but I guess we can still go through the
+# motions.
+# f_s = 250  # Hz, from lab manual
+f_s = 1  # Hz, from having eyes that work
+t = np.arange(len(pos_v))*(1/f_s)
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[512]:
+:end:
+
+\cthulhu{Plotting the data:}
+#+begin_src ipython :session :results raw drawer :exports both
+flow_q = flow(flow_v)
+fig, ax1 = plt.subplots()
+col = 'tab:red'
+ax1.set_xlabel('Time (s)')
+# Negative valve command for step input to more clearly match up
+# with flow rate
+ax1.set_ylabel('-Valve Command (V)', color=col)
+ax1.plot(t, -cmd_v, color=col)
+ax1.tick_params(axis='y', labelcolor=col)
+col = 'tab:blue'
+ax2 = ax1.twinx()
+ax2.set_ylabel('Flow Rate (mL/s)', color=col)
+ax2.plot(t, flow_q, color=col)
+ax2.tick_params(axis='y', labelcolor=col)
+fig.tight_layout()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[540]:
+[[file:./obipy-resources/QRQese.svg]]
+:end:
+*** Time Constant of the System
+\cthulhu{Now obviously we can't really find the time constant with any reasonable accuracy because there isn't enough data.}
+\cthulhu{The closest we can probably get is to just fit the data to a standard first order response and hope we end up with something vaguely reasonable.}
+#+begin_src ipython :session :results raw drawer :exports both
+def first_order(t, tau, A, C):
+    return A*np.exp(-t/tau) + C
+# Only fit the step response part, here I'm assuming the 1s
+# delay between the input step and the output changing is
+# an anomaly of data collection
+fit_data = flow_q[4:9]
+fit_time = t[:5]
+plot_time = np.linspace(0, 5, 10000)
+popt, pcov = scipy.optimize.curve_fit(first_order, fit_time, fit_data)
+tau, A, C = popt
+plt.scatter(t, flow_q, label="Raw Data")
+plt.plot(plot_time + 4, first_order(plot_time, tau, A, C),
+         label=f"First order fit ($\\tau \\approx {tau:.4f}$s)")
+plt.ylabel('Flow Rate (mL/s)')
+plt.xlabel('Time (s)')
+plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[665]:
+: <matplotlib.legend.Legend at 0x7f9ad4f36e50>
+[[file:./obipy-resources/nDdjMp.svg]]
+:end:
+
+
+
+
